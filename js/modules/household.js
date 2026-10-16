@@ -1,0 +1,521 @@
+import { state, byLedger, refresh, tagOf, setting, saveSetting, insertMany, removeMany, notesFor } from '../store.js';
+import { getConfig } from '../config.js';
+import { openEntryForm } from '../forms.js';
+import { openSheet, runTask, toast } from '../ui.js';
+import { extractSms, splitSmsText, parseKbSms, classify, applyPayrollDeductions, KB_SENDER } from '../sms_rules.js';
+import { ICONS } from '../icons.js';
+import { esc, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson } from '../utils.js';
+
+const KIND = 'household';
+const TOP_CATEGORIES = 3;
+const TREND_MONTHS = 6;
+const IMPORT_CHUNK = 500;
+const viewMonth = new Map(); // 장부별로 보고 있는 월
+const viewAccount = new Map(); // 장부별 계좌 필터
+
+const monthOf = (ledgerId) => viewMonth.get(ledgerId) || thisMonth();
+
+/**
+ * 카테고리 tag
+ * - transfer : 내 계좌·가족 간 이동 → 수입·지출에서 제외
+ * - asset    : 목돈(집·차·가족 간 큰돈) → 생활 수입·지출에서 제외
+ * - saving   : 저축·투자 → 지출과 따로 집계
+ * - refund   : 환급·환불(보험금·결제 취소) → 수입이 아니라 이미 쓴 돈이 돌아온 것이므로 생활 지출에서 뺀다
+ */
+const tagOfEntry = (e) => tagOf(KIND, e.category);
+
+/** 월세 메뉴의 월세 입금 (가계부에는 중복 방지를 위해 넣지 않고 합계에만 더한다) */
+function rentEntriesOf(month) {
+  const rentLedgers = new Set(state.ledgers.filter((l) => l.kind === 'rent').map((l) => l.id));
+  return state.entries.filter((e) => rentLedgers.has(e.ledger_id) && e.flow === 'in' && e.date.startsWith(month) && tagOf('rent', e.category) === 'rent');
+}
+
+function summarize(ledgerId, month, account = '') {
+  const list = byLedger('entries', ledgerId)
+    .filter((e) => e.date.startsWith(month) && (!account || e.account === account))
+    .sort(byDateDesc);
+  const live = list.filter((e) => !tagOfEntry(e));
+  const outs = live.filter((e) => e.flow === 'out');
+  const ins = live.filter((e) => e.flow === 'in');
+  const savings = list.filter((e) => tagOfEntry(e) === 'saving');
+  const refunds = list.filter((e) => tagOfEntry(e) === 'refund');
+  const moved = list.filter((e) => ['transfer', 'asset'].includes(tagOfEntry(e)));
+  const rents = account ? [] : rentEntriesOf(month); // 계좌별로 볼 때는 월세 제외
+  const cats = new Map();
+  outs.forEach((e) => cats.set(e.category, (cats.get(e.category) || 0) + Number(e.amount)));
+  const spent = sum(outs, (e) => e.amount);
+  const refund = sum(refunds, (e) => (e.flow === 'in' ? e.amount : -e.amount));
+  return {
+    list,
+    outs: [...outs, ...refunds].sort(byDateDesc),
+    ins: [...ins, ...rents].sort(byDateDesc),
+    savings,
+    moved,
+    income: sum(ins, (e) => e.amount) + sum(rents, (e) => e.amount),
+    salary: sum(ins.filter((e) => e.category === '급여'), (e) => e.amount),
+    rent: sum(rents, (e) => e.amount),
+    expense: spent - refund, // 생활 지출 = 쓴 돈 - 돌려받은 돈
+    spent,
+    refund,
+    saving: sum(savings, (e) => (e.flow === 'out' ? e.amount : -e.amount)),
+    movedTotal: sum(moved, (e) => e.amount),
+    cats: [...cats].sort((a, b) => b[1] - a[1]),
+  };
+}
+
+function compareText(s, prev) {
+  if (!prev.expense) return '';
+  const diff = s.expense - prev.expense;
+  if (diff === 0) return '지난달과 지출이 같아요';
+  return `지난달보다 ${won(Math.abs(diff))} ${diff > 0 ? '더 썼어요' : '덜 썼어요'}`;
+}
+
+/** rows: [이름, 금액, data 속성(누르면 조회)] */
+const bars = (rows, max, total) => rows.map(([name, value, data]) => {
+  const inner = `
+    <div class="cat_bar_head">
+      <span class="cat_bar_name">${esc(name)}</span>
+      <span class="cat_bar_value">${won(value)}${total ? ` · ${Math.round((value / total) * 100)}%` : ''}</span>
+    </div>
+    <div class="cat_bar_track"><div class="cat_bar_fill" style="width:${max ? ((value / max) * 100).toFixed(1) : 0}%"></div></div>`;
+  return `<li>${data ? `<button type="button" class="cat_bar_btn" ${data}>${inner}</button>` : inner}</li>`;
+}).join('');
+
+/* ---------- 홈 위젯 ---------- */
+
+function widget(ledgers) {
+  if (!ledgers.length) return '';
+  const ledger = ledgers[0];
+  const month = thisMonth();
+  const s = summarize(ledger.id, month);
+  const prev = summarize(ledger.id, addMonths(month, -1));
+  return `
+    <a class="widget" href="#/m/household/${esc(ledger.id)}">
+      <div class="widget_head"><span class="widget_icon">${ICONS.wallet}</span><strong class="widget_title">${Number(month.slice(5))}월 가계부</strong>${ICONS.next}</div>
+      ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)}</p>`).join('')}
+      <p class="widget_value">${won(s.expense)}</p>
+      <p class="widget_sub">지출 · 수입 ${won(s.income)} · 저축 ${won(s.saving)}</p>
+      ${compareText(s, prev) ? `<p class="widget_sub">${compareText(s, prev)}</p>` : ''}
+      ${s.cats.length ? `<ul class="cat_bars widget_bars">${bars(s.cats.slice(0, TOP_CATEGORIES), s.cats[0][1])}</ul>` : '<p class="widget_sub">아직 이번 달 내역이 없어요</p>'}
+    </a>`;
+}
+
+/* ---------- 상세 화면 ---------- */
+
+function entryItem(e) {
+  const isRent = e.ledger_id && state.ledgers.find((l) => l.id === e.ledger_id)?.kind === 'rent';
+  const sub = [isRent ? '월세 메뉴' : e.account, e.memo, e.by].filter(Boolean).join(' · ');
+  const tag = isRent ? '' : tagOfEntry(e);
+  return `
+    <li class="list_row">
+      <button type="button" class="list_item${['transfer', 'asset'].includes(tag) ? ' is_excluded' : ''}" data-entry="${esc(e.id)}">
+        <span class="list_item_body">
+          <span class="list_item_title">${esc(e.category)}</span>
+          ${sub ? `<span class="list_item_sub">${esc(sub)}</span>` : ''}
+        </span>
+        <span class="list_item_amount ${e.flow === 'in' ? 'amount_in' : 'amount_out'}">${e.flow === 'in' ? '+' : '-'}${won(e.amount)}</span>
+      </button>
+    </li>`;
+}
+
+function groupedList(list, empty) {
+  const days = new Map();
+  list.forEach((e) => {
+    if (!days.has(e.date)) days.set(e.date, []);
+    days.get(e.date).push(e);
+  });
+  const groups = [...days].map(([date, items]) => {
+    const spent = sum(items.filter((e) => e.flow === 'out' && !tagOfEntry(e)), (e) => e.amount);
+    return `
+      <li class="day_group">
+        <div class="day_group_head"><span>${fmtDay(date)}</span><span>${spent ? `-${won(spent)}` : ''}</span></div>
+        <ul>${items.map(entryItem).join('')}</ul>
+      </li>`;
+  }).join('');
+  return groups ? `<ul>${groups}</ul>` : `<p class="empty">${empty}</p>`;
+}
+
+function trendHtml(ledgerId, month, account) {
+  const rows = Array.from({ length: TREND_MONTHS }, (_, i) => addMonths(month, i - TREND_MONTHS + 1))
+    .map((m) => [
+      `${Number(m.slice(5))}월${notesFor(m).length ? ` · ${notesFor(m).map((n) => n.label).join(', ')}` : ''}`,
+      summarize(ledgerId, m, account).expense,
+      `data-jump="${m}" aria-label="${fmtMonth(m)}로 이동"`,
+    ]);
+  const max = Math.max(...rows.map((r) => r[1]));
+  if (!max) return '';
+  return `
+    <section class="card">
+      <h2 class="card_title">최근 ${TREND_MONTHS}개월 지출 <span class="field_hint">누르면 그 달로 이동</span></h2>
+      <ul class="cat_bars">${bars(rows, max)}</ul>
+    </section>`;
+}
+
+/** 요약 숫자를 누르면 해당 내역만 모아 보여준다 */
+function openDrill(s, key, monthLabel) {
+  const [kind, name] = key.split(':');
+  const pick = {
+    expense: ['생활 지출', s.outs],
+    income: ['수입', s.ins],
+    saving: ['저축·투자', s.savings],
+    moved: ['계좌 이동·목돈', s.moved],
+    cat: [name, s.outs.filter((e) => e.category === name)],
+  }[kind];
+  if (!pick) return;
+  const [title, list] = pick;
+  const net = sum(list, (e) => (e.flow === 'in' ? e.amount : -e.amount));
+  openSheet({
+    title: `${monthLabel} ${title}`,
+    body: `
+      <p class="drill_total">${list.length}건 · ${net < 0 ? '-' : '+'}${won(Math.abs(net))}</p>
+      ${groupedList(list, '해당하는 내역이 없어요')}`,
+    onMount(body, close) {
+      body.addEventListener('click', (e) => {
+        const id = e.target.closest('[data-entry]')?.dataset.entry;
+        if (!id) return;
+        const entry = state.entries.find((x) => x.id === id);
+        close();
+        openEntryForm({ ledger: state.ledgers.find((l) => l.id === entry.ledger_id), entry });
+      });
+    },
+  });
+}
+
+const statButton = (key, label, value, sub = '', valueClass = '') => `
+  <button type="button" class="stat_item is_link" data-drill="${key}">
+    <span class="stat_label">${label}</span>
+    <span class="stat_value${valueClass}">${value}</span>
+    ${sub ? `<span class="stat_sub">${sub}</span>` : ''}
+  </button>`;
+
+function view(ledger) {
+  const month = monthOf(ledger.id);
+  const accounts = [...new Set(byLedger('entries', ledger.id).map((e) => e.account).filter(Boolean))].sort();
+  const account = accounts.includes(viewAccount.get(ledger.id)) ? viewAccount.get(ledger.id) : '';
+  const s = summarize(ledger.id, month, account);
+  const prev = summarize(ledger.id, addMonths(month, -1), account);
+  const left = s.income - s.expense - s.saving;
+  const monthLabel = `${Number(month.slice(5))}월`;
+  const signed = (v) => `${v < 0 ? '-' : ''}${won(Math.abs(v))}`;
+
+  return {
+    html: `
+      <div class="month_nav">
+        <button type="button" class="icon_btn" data-step="-1" aria-label="이전 달">${ICONS.back}</button>
+        <strong class="month_nav_label">${fmtMonth(month)}</strong>
+        <button type="button" class="icon_btn" data-step="1" aria-label="다음 달"${month >= thisMonth() ? ' disabled' : ''}>${ICONS.next}</button>
+      </div>
+      ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)} <span class="period_note_range">${fmtDate(n.from)}${n.to && n.to !== n.from ? ` ~ ${fmtDate(n.to)}` : ''}</span></p>`).join('')}
+      ${accounts.length ? `
+        <div class="chip_row">
+          ${['', ...accounts].map((a) => `<button type="button" class="chip${a === account ? ' is_active' : ''}" data-account="${esc(a)}" aria-pressed="${a === account}">${esc(a || '전체')}</button>`).join('')}
+        </div>` : ''}
+      <section class="card">
+        <button type="button" class="hero_link" data-drill="expense">
+          <span class="hero_label">${monthLabel} 생활 지출</span>
+          <span class="hero_value">${won(s.expense)}</span>
+        </button>
+        ${s.refund ? `<p class="hero_sub">쓴 돈 ${won(s.spent)} - 환급·환불 ${won(s.refund)}</p>` : ''}
+        <p class="hero_sub">${compareText(s, prev)}</p>
+        <div class="stat_grid">
+          ${statButton('income', '수입', won(s.income), `급여 ${won(s.salary)}${s.rent ? ` · 월세 ${won(s.rent)}` : ''}`, ' amount_in')}
+          ${statButton('saving', '저축·투자', signed(s.saving))}
+          <div class="stat_item"><p class="stat_label">남은 돈</p><p class="stat_value">${signed(left)}</p><p class="stat_sub">수입 - 지출 - 저축</p></div>
+          ${statButton('moved', '계좌 이동·목돈', won(s.movedTotal), '합계에서 제외')}
+        </div>
+      </section>
+      ${s.cats.length ? `
+        <section class="card">
+          <h2 class="card_title">카테고리별 지출 <span class="field_hint">누르면 내역 보기</span></h2>
+          <ul class="cat_bars">${bars(s.cats.map(([name, value]) => [name, value, `data-drill="cat:${esc(name)}"`]), s.cats[0][1], s.spent)}</ul>
+        </section>` : ''}
+      ${trendHtml(ledger.id, month, account)}
+      <section class="card">
+        <h2 class="card_title">내역 <span class="field_hint">${s.list.length}건</span></h2>
+        ${groupedList(s.list, '이 달의 내역이 없어요<br>오른쪽 아래 + 버튼으로 추가해보세요')}
+      </section>
+      <section class="card">
+        <h2 class="card_title">은행 문자로 채우기</h2>
+        <p class="card_desc">문자를 붙여넣거나 백업 파일을 올리면 자동으로 분류해서 넣어요. 폰에 자동 전송을 설정하면 문자가 올 때마다 저절로 들어와요.</p>
+        <button type="button" class="btn btn_sub" data-action="import">${ICONS.message}<span>문자 내역 가져오기</span></button>
+      </section>
+      <button type="button" class="fab" data-action="add" aria-label="내역 추가">${ICONS.plus}</button>`,
+    mount(el) {
+      el.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-step],[data-action],[data-entry],[data-account],[data-drill],[data-jump]');
+        if (!target) return;
+        const { step, action, entry, drill, jump } = target.dataset;
+        if (step || jump) {
+          const next = jump || addMonths(month, Number(step));
+          if (next > thisMonth()) return; // 미래 달로는 가지 않는다
+          viewMonth.set(ledger.id, next);
+          refresh();
+        }
+        if (target.dataset.account !== undefined) {
+          viewAccount.set(ledger.id, target.dataset.account);
+          refresh();
+        }
+        if (drill) openDrill(s, drill, monthLabel);
+        if (action === 'add') openEntryForm({ ledger, defaults: { date: month === thisMonth() ? todayStr() : `${month}-01`, account } });
+        if (action === 'import') openSmsImport(ledger);
+        if (entry) openEntryForm({ ledger, entry: state.entries.find((x) => x.id === entry) });
+      });
+    },
+  };
+}
+
+/* ---------- 은행 문자 → 가계부 내역 ---------- */
+
+const normalizeName = (s) => String(s || '').replace(/주식회사|\(주\)|㈜|주\)|\s/g, '');
+
+/** 월세 장부에 이미 있는 입금(임차인 이름·계약 소재지 단어)인지 */
+function rentMatcher() {
+  const contracts = state.contracts;
+  const tenants = contracts.map((c) => normalizeName(c.tenant)).filter((t) => t.length >= 2);
+  const words = contracts.flatMap((c) => String(c.address || '').split(/\s+/))
+    .filter((w) => w.length >= 3 && !/\d/.test(w) && !/[시도군구읍면동리호]$/.test(w));
+  return (tx) => {
+    const who = normalizeName(tx.who);
+    if (who.length < 2) return false;
+    return tenants.some((t) => t.startsWith(who) || who.startsWith(t)) || words.some((w) => who.includes(w));
+  };
+}
+
+/** 문자 목록 [{ date(받은 시각 ms), body }] → 새로 넣을 가계부 내역과 통계 */
+function buildEntries(ledger, messages, { accounts, members } = {}) {
+  const ctx = {
+    accounts: accounts || parseJson(setting('bank_accounts'), []),
+    members: members || parseJson(setting('family_members'), []),
+    custom: parseJson(setting('sms_rules'), []),
+    isRent: rentMatcher(),
+  };
+  const known = new Set(state.entries.map((e) => e.ref).filter(Boolean));
+  const stats = { rent: 0, dup: 0, other: 0, byAccount: new Map(), byCategory: new Map() };
+  const fresh = [];
+  messages.forEach((m) => {
+    const tx = parseKbSms(m.body, m.date, ctx.accounts);
+    if (!tx) { stats.other += 1; return; }
+    if (known.has(tx.ref)) { stats.dup += 1; return; }
+    const c = classify(tx, ctx);
+    if (!c) { stats.rent += 1; return; }
+    known.add(tx.ref);
+    fresh.push({ ledger_id: ledger.id, date: tx.date, flow: c.flow, category: c.category, amount: tx.amount, months: '', memo: tx.who || tx.kind, by: '', account: tx.account, ref: tx.ref });
+    stats.byAccount.set(tx.account, (stats.byAccount.get(tx.account) || 0) + 1);
+    stats.byCategory.set(c.category, (stats.byCategory.get(c.category) || 0) + 1);
+  });
+  const before = fresh.length;
+  applyPayrollDeductions(fresh, parseJson(setting('payroll_deductions'), []), byLedger('entries', ledger.id));
+  stats.deducted = fresh.length - before;
+  return { fresh, stats };
+}
+
+async function saveEntries(fresh, onProgress) {
+  let saved = 0;
+  for (let i = 0; i < fresh.length; i += IMPORT_CHUNK) {
+    onProgress?.(Math.min(i + IMPORT_CHUNK, fresh.length), fresh.length);
+    saved += (await insertMany('entries', fresh.slice(i, i + IMPORT_CHUNK))).length;
+  }
+  return saved;
+}
+
+/** 폰 자동 전송으로 받은 문자함을 분류해서 넣고 비운다 (동기화할 때마다) */
+let processing = false;
+async function processInbox() {
+  const ledger = state.ledgers.find((l) => l.kind === KIND);
+  if (processing || !ledger || !state.inbox.length) return;
+  processing = true;
+  try {
+    const inbox = state.inbox.slice();
+    const { fresh } = buildEntries(ledger, inbox.map((r) => ({ date: Date.parse(r.received_at) || Date.now(), body: r.text })));
+    const saved = fresh.length ? await saveEntries(fresh) : 0;
+    await removeMany('inbox', inbox.map((r) => r.id));
+    if (saved) toast(`은행 문자 ${saved}건을 가계부에 넣었어요`);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    processing = false;
+  }
+}
+
+/** 다른 앱에서 '공유'로 받은 글 (설치된 앱일 때) */
+function onShare(text) {
+  const ledger = state.ledgers.find((l) => l.kind === KIND);
+  if (!ledger) return toast('가계부를 먼저 만들어주세요', true);
+  location.hash = `#/m/household/${ledger.id}`;
+  openSmsImport(ledger, text);
+}
+
+function autoGuideHtml() {
+  const { apiUrl, token } = getConfig();
+  const row = (label, value) => `<dt>${label}</dt><dd><code class="copy_value" data-copy="${esc(value)}">${esc(value)}</code></dd>`;
+  return `
+    <details class="import_details">
+      <summary>폰에서 문자 자동으로 넣기 (안드로이드)</summary>
+      <ol class="guide_list">
+        <li>플레이스토어에서 <strong>MacroDroid</strong> 설치 → <strong>매크로 추가</strong></li>
+        <li><strong>트리거</strong>: 수신 SMS → 발신자 <strong>특정 번호</strong> <code>16449999</code></li>
+        <li><strong>액션</strong>: HTTP 요청 → 방식 <strong>POST</strong>, 본문 유형 <strong>application/x-www-form-urlencoded</strong></li>
+        <li>아래 값을 누르면 복사돼요. URL과 파라미터 3개를 넣어주세요. <code>text</code> 값은 매직 텍스트에서 <strong>SMS 메시지</strong>를 고르세요.</li>
+      </ol>
+      <dl class="info_list guide_values">
+        ${row('URL', apiUrl)}
+        ${row('token', token)}
+        ${row('action', 'ingestSms')}
+        <dt>text</dt><dd><code>[sms_message]</code></dd>
+      </dl>
+      <p class="field_hint">폰 설정 → 배터리 → MacroDroid를 <strong>제한 없음</strong>으로 바꿔야 끊기지 않아요. 받은 문자는 앱을 열 때 자동으로 분류돼요.</p>
+    </details>`;
+}
+
+function openSmsImport(ledger, sharedText = '') {
+  const saved = parseJson(setting('bank_accounts'), []);
+  const members = parseJson(setting('family_members'), []);
+  const rows = Array.from({ length: 3 }, (_, i) => saved[i] || { prefix: '', name: '' });
+  let closeSheet;
+  let busy = false;
+
+  openSheet({
+    title: '은행 문자 가져오기',
+    body: `
+      <div class="import_body">
+        <form class="form" data-form="paste" novalidate>
+          <label class="field">
+            <span class="field_label">문자 붙여넣기 (여러 개도 한꺼번에)</span>
+            <textarea class="field_input field_textarea" name="text" placeholder="[KB]10/15 15:10&#10;123456**789&#10;거래처&#10;출금&#10;10,000&#10;잔액1,000,000">${esc(sharedText)}</textarea>
+          </label>
+          <p class="field_hint">KB국민은행(1644-9999) 입출금 문자를 길게 눌러 복사하거나, 문자 앱에서 <strong>공유 → 우리집 장부</strong>를 고르세요.</p>
+          <button type="submit" class="btn btn_sub">붙여넣은 문자 확인</button>
+        </form>
+        <div class="import_or"><span>또는</span></div>
+        <label class="import_pick">
+          <input type="file" accept=".xml,text/xml" class="blind" name="xml">
+          <span class="import_pick_icon">${ICONS.message}</span>
+          <strong>문자 백업 파일(XML) 고르기</strong>
+          <span class="field_hint">SMS Backup &amp; Restore로 내보낸 파일. 다른 문자는 읽지 않아요</span>
+        </label>
+        ${autoGuideHtml()}
+        <details class="import_details">
+          <summary>계좌·가족 설정</summary>
+          <div class="form">
+            <div class="field">
+              <span class="field_label">계좌 (계좌번호 앞자리 → 통장 이름)</span>
+              ${rows.map((r, i) => `
+                <div class="field_row">
+                  <input class="field_input" name="prefix_${i}" inputmode="numeric" maxlength="6" placeholder="앞자리 4자리" value="${esc(r.prefix)}" aria-label="계좌 ${i + 1} 앞자리">
+                  <input class="field_input" name="account_${i}" maxlength="10" placeholder="통장 이름" value="${esc(r.name)}" aria-label="계좌 ${i + 1} 이름">
+                </div>`).join('')}
+            </div>
+            <label class="field">
+              <span class="field_label">가족 이름 (서로·본인 계좌 간 이동은 합계에서 제외)</span>
+              <input class="field_input" name="members" placeholder="쉼표로 구분" value="${esc(members.join(', '))}">
+            </label>
+          </div>
+        </details>
+      </div>`,
+    onMount(body, close) {
+      closeSheet = close;
+      const box = body.querySelector('.import_body');
+      body.querySelector('input[type=file]').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const options = readOptions(box);
+        if (!options) return;
+        box.innerHTML = '<div class="import_progress"><p>문자 읽는 중…</p></div>';
+        analyze(box, extractSms(await file.text(), KB_SENDER), options);
+      });
+      body.querySelector('[data-form=paste]').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const chunks = splitSmsText(e.target.elements.text.value);
+        if (!chunks.length) return toast('[KB]로 시작하는 은행 문자를 붙여넣어주세요', true);
+        const options = readOptions(box);
+        if (options) analyze(box, chunks.map((text) => ({ date: Date.now(), body: text })), options);
+      });
+      body.addEventListener('click', async (e) => {
+        const value = e.target.closest('[data-copy]')?.dataset.copy;
+        if (!value) return;
+        try {
+          await navigator.clipboard.writeText(value);
+          toast('복사했어요');
+        } catch {
+          toast('복사하지 못했어요. 길게 눌러 복사해주세요', true);
+        }
+      });
+      if (sharedText) body.querySelector('[data-form=paste]').requestSubmit();
+    },
+    onClose: () => { if (busy) toast('가져오기는 계속 진행 중이에요'); },
+  });
+
+  function readOptions(box) {
+    const accounts = rows.map((_, i) => ({ prefix: box.querySelector(`[name=prefix_${i}]`).value.trim(), name: box.querySelector(`[name=account_${i}]`).value.trim() }))
+      .filter((a) => a.prefix && a.name);
+    const family = box.querySelector('[name=members]').value.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!accounts.length) {
+      box.querySelector('.import_details:last-of-type').open = true;
+      toast('계좌 앞자리와 이름을 입력해주세요', true);
+      return null;
+    }
+    return { accounts, members: family };
+  }
+
+  function analyze(box, messages, options) {
+    const { fresh, stats } = buildEntries(ledger, messages, options);
+    if (!fresh.length) {
+      box.innerHTML = `<p class="empty">새로 넣을 내역이 없어요${stats.dup ? `<br>(이미 있는 내역 ${stats.dup}건)` : ''}${stats.other ? `<br>(등록한 계좌가 아니거나 읽을 수 없는 문자 ${stats.other}건)` : ''}</p>`;
+      return;
+    }
+    const dates = fresh.map((r) => r.date).sort();
+    const unknown = stats.byCategory.get('미분류') || 0;
+    box.innerHTML = `
+      <dl class="info_list import_summary">
+        <dt>기간</dt><dd>${fmtDate(dates[0])}${dates[0] !== dates[dates.length - 1] ? ` ~ ${fmtDate(dates[dates.length - 1])}` : ''}</dd>
+        <dt>새 내역</dt><dd>${fresh.length.toLocaleString('ko-KR')}건</dd>
+        ${[...stats.byAccount].map(([a, n]) => `<dt>${esc(a)}</dt><dd>${n.toLocaleString('ko-KR')}건</dd>`).join('')}
+        ${stats.dup ? `<dt>이미 있는 내역</dt><dd>${stats.dup.toLocaleString('ko-KR')}건 건너뜀</dd>` : ''}
+        ${stats.rent ? `<dt>월세 입금</dt><dd>${stats.rent}건 (월세 메뉴에 있어 제외)</dd>` : ''}
+        ${stats.deducted ? `<dt>급여 공제 반영</dt><dd>${stats.deducted}개월 (급여에 더하고 지출로 추가)</dd>` : ''}
+        <dt>분류 못 한 내역</dt><dd>${unknown.toLocaleString('ko-KR')}건 → '미분류'</dd>
+      </dl>
+      ${fresh.length <= 5 ? `<ul class="import_preview">${fresh.map((r) => `<li>${fmtDate(r.date).slice(5)} ${esc(r.category)} <strong class="${r.flow === 'in' ? 'amount_in' : 'amount_out'}">${r.flow === 'in' ? '+' : '-'}${won(r.amount)}</strong> <span>${esc(r.memo)}</span></li>`).join('')}</ul>` : ''}
+      <button type="button" class="btn" data-start>${fresh.length.toLocaleString('ko-KR')}건 넣기</button>`;
+
+    box.querySelector('[data-start]').addEventListener('click', async (e) => {
+      busy = true;
+      let saved = 0;
+      const ok = await runTask(e.target, async () => {
+        await saveSetting('bank_accounts', JSON.stringify(options.accounts));
+        await saveSetting('family_members', JSON.stringify(options.members));
+        saved = await saveEntries(fresh, (n, total) => {
+          box.innerHTML = `<div class="import_progress"><p>저장 중 ${n}/${total}</p><div class="cat_bar_track"><div class="cat_bar_fill" style="width:${Math.round((n / total) * 100)}%"></div></div></div>`;
+        });
+      });
+      busy = false;
+      if (ok) {
+        closeSheet();
+        toast(`${saved.toLocaleString('ko-KR')}건을 넣었어요`);
+      }
+    });
+  }
+}
+
+export default {
+  kind: KIND,
+  label: '가계부',
+  nav: 'wallet',
+  defaultName: '우리집 생활비',
+  description: '월별 수입·지출·저축과 카테고리별 소비를 관리해요',
+  categories: {
+    in: [
+      ['급여', ''], ['정부지원', ''], ['금융수입', ''], ['환급·환불', 'refund'], ['가족·지인 입금', ''], ['현금 입금', ''], ['부수입', ''], ['기타수입', ''],
+      ['저축 해지', 'saving'], ['목돈 입금', 'asset'], ['내 계좌 이동', 'transfer'],
+    ],
+    out: [
+      ['식비', ''], ['외식', ''], ['생필품', ''], ['쇼핑', ''], ['카드대금', ''], ['주거·관리비', ''], ['공과금', ''], ['통신비', ''], ['보험', ''], ['대출·할부', ''],
+      ['교통', ''], ['의료', ''], ['교육', ''], ['육아', ''], ['용돈', ''], ['생활비 이체', ''], ['경조사·송금', ''], ['여가', ''], ['현금 인출', ''], ['수수료', ''], ['기타', ''], ['미분류', ''],
+      ['저축·투자', 'saving'], ['목돈 지출', 'asset'], ['내 계좌 이동', 'transfer'],
+    ],
+  },
+  widget,
+  view,
+  onSync: processInbox,
+  onShare,
+};
