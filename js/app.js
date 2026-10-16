@@ -112,7 +112,7 @@ window.addEventListener('hashchange', render);
 // 예전 주소(#/ledger/:id)로 열면 홈으로
 if (location.hash.startsWith('#/ledger/')) history.replaceState(null, '', '#/');
 
-// 다른 앱에서 '공유 → 우리집 장부'로 보낸 글 (manifest의 share_target)
+// 다른 앱에서 '공유 → 우리셋'로 보낸 글 (manifest의 share_target)
 const params = new URLSearchParams(location.search);
 const sharedText = ['shared_title', 'shared_text', 'shared_url'].map((k) => params.get(k)).filter(Boolean).join('\n');
 if (sharedText) history.replaceState(null, '', `${location.pathname}#/`);

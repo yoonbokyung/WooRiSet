@@ -4,7 +4,7 @@ import { openEntryForm } from '../forms.js';
 import { openSheet, runTask, toast } from '../ui.js';
 import { extractSms, splitSmsText, parseKbSms, classify, applyPayrollDeductions, KB_SENDER } from '../sms_rules.js';
 import { ICONS } from '../icons.js';
-import { esc, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson } from '../utils.js';
+import { esc, pad, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson } from '../utils.js';
 
 const KIND = 'household';
 const TOP_CATEGORIES = 3;
@@ -83,20 +83,83 @@ const bars = (rows, max, total) => rows.map(([name, value, data]) => {
 
 /* ---------- 홈 위젯 ---------- */
 
+const RECENT_COUNT = 5;
+const signedWon = (v) => `${v < 0 ? '-' : ''}${won(Math.abs(v))}`;
+
+/** 최근 6개월 지출 막대 (이번 달만 진하게) */
+function miniChart(ledgerId, month) {
+  const months = Array.from({ length: TREND_MONTHS }, (_, i) => addMonths(month, i - TREND_MONTHS + 1));
+  const values = months.map((m) => summarize(ledgerId, m).expense);
+  const max = Math.max(...values);
+  if (!max) return '';
+  return `
+    <div class="mini_chart" role="img" aria-label="최근 ${TREND_MONTHS}개월 지출: ${months.map((m, i) => `${Number(m.slice(5))}월 ${won(values[i])}`).join(', ')}">
+      ${months.map((m, i) => `
+        <div class="mini_chart_col" title="${fmtMonth(m)} ${won(values[i])}">
+          <span class="mini_chart_track"><span class="mini_chart_bar${m === month ? ' is_current' : ''}" style="height:${Math.max((values[i] / max) * 100, 2).toFixed(1)}%"></span></span>
+          <span class="mini_chart_label">${Number(m.slice(5))}월</span>
+        </div>`).join('')}
+    </div>`;
+}
+
 function widget(ledgers) {
   if (!ledgers.length) return '';
   const ledger = ledgers[0];
+  const link = `#/m/household/${esc(ledger.id)}`;
   const month = thisMonth();
+  const year = month.slice(0, 4);
   const s = summarize(ledger.id, month);
   const prev = summarize(ledger.id, addMonths(month, -1));
+  const left = s.income - s.expense - s.saving;
+
+  // 올해 1월부터 이번 달까지
+  const ytdMonths = Array.from({ length: Number(month.slice(5)) }, (_, i) => `${year}-${pad(i + 1)}`);
+  const ytd = ytdMonths.map((m) => summarize(ledger.id, m)).reduce((acc, x) => ({
+    income: acc.income + x.income, expense: acc.expense + x.expense, saving: acc.saving + x.saving,
+  }), { income: 0, expense: 0, saving: 0 });
+  const saveRate = ytd.income ? Math.round((ytd.saving / ytd.income) * 100) : 0;
+
+  const recent = byLedger('entries', ledger.id)
+    .filter((e) => !['transfer', 'asset'].includes(tagOfEntry(e)))
+    .sort(byDateDesc)
+    .slice(0, RECENT_COUNT);
+
   return `
-    <a class="widget" href="#/m/household/${esc(ledger.id)}">
+    <a class="widget" href="${link}">
       <div class="widget_head"><span class="widget_icon">${ICONS.wallet}</span><strong class="widget_title">${Number(month.slice(5))}월 가계부</strong>${ICONS.next}</div>
       ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)}</p>`).join('')}
+      <p class="widget_label">생활 지출</p>
       <p class="widget_value">${won(s.expense)}</p>
-      <p class="widget_sub">지출 · 수입 ${won(s.income)} · 저축 ${won(s.saving)}</p>
       ${compareText(s, prev) ? `<p class="widget_sub">${compareText(s, prev)}</p>` : ''}
+      <div class="widget_stats">
+        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in">${won(s.income)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">저축</span><span class="widget_stat_value">${signedWon(s.saving)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">남은 돈</span><span class="widget_stat_value">${signedWon(left)}</span></div>
+      </div>
+      ${miniChart(ledger.id, month)}
       ${s.cats.length ? `<ul class="cat_bars widget_bars">${bars(s.cats.slice(0, TOP_CATEGORIES), s.cats[0][1])}</ul>` : '<p class="widget_sub">아직 이번 달 내역이 없어요</p>'}
+    </a>
+    ${recent.length ? `
+      <a class="widget" href="${link}">
+        <div class="widget_head"><span class="widget_icon">${ICONS.message}</span><strong class="widget_title">최근 내역</strong>${ICONS.next}</div>
+        <ul class="recent_list">
+          ${recent.map((e) => `
+            <li class="recent_row">
+              <span class="recent_date">${fmtDate(e.date).slice(5)}</span>
+              <span class="recent_body"><span class="recent_title">${esc(e.memo || e.category)}</span><span class="recent_sub">${esc([e.category, e.account].filter(Boolean).join(' · '))}</span></span>
+              <span class="recent_amount ${e.flow === 'in' ? 'amount_in' : 'amount_out'}">${e.flow === 'in' ? '+' : '-'}${won(e.amount)}</span>
+            </li>`).join('')}
+        </ul>
+      </a>` : ''}
+    <a class="widget" href="${link}">
+      <div class="widget_head"><span class="widget_icon">${ICONS.home}</span><strong class="widget_title">${year}년 한눈에</strong>${ICONS.next}</div>
+      <div class="widget_stats is_grid">
+        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in">${won(ytd.income)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">생활 지출</span><span class="widget_stat_value">${won(ytd.expense)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">저축</span><span class="widget_stat_value">${signedWon(ytd.saving)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">저축률</span><span class="widget_stat_value">${saveRate}%</span></div>
+      </div>
+      <p class="widget_sub">월평균 생활 지출 ${won(Math.round(ytd.expense / ytdMonths.length))}</p>
     </a>`;
 }
 
@@ -202,7 +265,7 @@ function view(ledger) {
     html: `
       <div class="month_nav">
         <button type="button" class="icon_btn" data-step="-1" aria-label="이전 달">${ICONS.back}</button>
-        <strong class="month_nav_label">${fmtMonth(month)}</strong>
+        <button type="button" class="month_nav_label" data-action="pick_month" aria-label="${fmtMonth(month)}, 년·월 직접 선택">${fmtMonth(month)}<span class="month_nav_caret" aria-hidden="true">▾</span></button>
         <button type="button" class="icon_btn" data-step="1" aria-label="다음 달"${month >= thisMonth() ? ' disabled' : ''}>${ICONS.next}</button>
       </div>
       ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)} <span class="period_note_range">${fmtDate(n.from)}${n.to && n.to !== n.from ? ` ~ ${fmtDate(n.to)}` : ''}</span></p>`).join('')}
@@ -258,10 +321,45 @@ function view(ledger) {
         if (drill) openDrill(s, drill, monthLabel);
         if (action === 'add') openEntryForm({ ledger, defaults: { date: month === thisMonth() ? todayStr() : `${month}-01`, account } });
         if (action === 'import') openSmsImport(ledger);
+        if (action === 'pick_month') openMonthPicker(ledger, month, account);
         if (entry) openEntryForm({ ledger, entry: state.entries.find((x) => x.id === entry) });
       });
     },
   };
+}
+
+/** 년·월 직접 선택: 내역이 있는 달(과 이번 달)만 고를 수 있다 */
+function openMonthPicker(ledger, month, account) {
+  const now = thisMonth();
+  const have = new Set(byLedger('entries', ledger.id)
+    .filter((e) => !account || e.account === account)
+    .map((e) => e.date.slice(0, 7))
+    .filter((m) => m <= now));
+  have.add(now);
+  const years = [...new Set([...have].map((m) => m.slice(0, 4)))].sort().reverse();
+  openSheet({
+    title: '년·월 선택',
+    body: years.map((y) => `
+      <div class="month_pick_year">
+        <p class="month_pick_label">${y}년</p>
+        <div class="month_pick_grid">
+          ${Array.from({ length: 12 }, (_, i) => {
+            const m = `${y}-${pad(i + 1)}`;
+            return `<button type="button" class="month_pick_btn${m === month ? ' is_active' : ''}" data-pick="${m}"${have.has(m) ? '' : ' disabled'}>${i + 1}월</button>`;
+          }).join('')}
+        </div>
+      </div>`).join(''),
+    onMount(body, close) {
+      body.querySelector('.is_active')?.scrollIntoView({ block: 'center' });
+      body.addEventListener('click', (e) => {
+        const picked = e.target.closest('[data-pick]:not(:disabled)')?.dataset.pick;
+        if (!picked) return;
+        viewMonth.set(ledger.id, picked);
+        close();
+        refresh();
+      });
+    },
+  });
 }
 
 /* ---------- 은행 문자 → 가계부 내역 ---------- */
@@ -383,7 +481,7 @@ function openSmsImport(ledger, sharedText = '') {
             <span class="field_label">문자 붙여넣기 (여러 개도 한꺼번에)</span>
             <textarea class="field_input field_textarea" name="text" placeholder="[KB]10/15 15:10&#10;123456**789&#10;거래처&#10;출금&#10;10,000&#10;잔액1,000,000">${esc(sharedText)}</textarea>
           </label>
-          <p class="field_hint">KB국민은행(1644-9999) 입출금 문자를 길게 눌러 복사하거나, 문자 앱에서 <strong>공유 → 우리집 장부</strong>를 고르세요.</p>
+          <p class="field_hint">KB국민은행(1644-9999) 입출금 문자를 길게 눌러 복사하거나, 문자 앱에서 <strong>공유 → 우리셋</strong>를 고르세요.</p>
           <button type="submit" class="btn btn_sub">붙여넣은 문자 확인</button>
         </form>
         <div class="import_or"><span>또는</span></div>

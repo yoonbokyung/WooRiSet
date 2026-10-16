@@ -5,7 +5,7 @@ import { call } from './api.js';
  * 화면에는 <img data-photo="드라이브 파일 id">로 두면 hydratePhotos()가 채운다.
  */
 const CACHE_NAME = 'hl-photos';
-const MAX_BYTES = 500 * 1024; // 이미지 규칙: 500KB 이하
+const MAX_BYTES = 350 * 1024; // 앱용 사본은 350KB 이하 (이미지 규칙 500KB보다 여유 있게)
 const BATCH = 12;
 const urls = new Map(); // 파일 id → object URL
 const pending = new Set();
@@ -21,15 +21,17 @@ async function toJpeg(file, maxSide, quality) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
 }
 
-/** 원본은 긴 변 1600px·500KB 이하, 썸네일은 480px */
+// 크기·화질 순서대로 줄여보며 MAX_BYTES 이하가 되는 첫 결과를 쓴다
+const STEPS = [[1600, 0.8], [1600, 0.7], [1600, 0.6], [1280, 0.7], [1280, 0.6], [1024, 0.6], [1024, 0.5]];
+
+/** 사본은 긴 변 최대 1600px·350KB 이하, 썸네일은 480px */
 async function compress(file) {
   let blob;
-  for (let q = 0.85; q > 0.3; q -= 0.1) {
-    blob = await toJpeg(file, 1600, q);
+  for (const [side, quality] of STEPS) {
+    blob = await toJpeg(file, side, quality);
     if (blob.size <= MAX_BYTES) break;
   }
-  if (blob.size > MAX_BYTES) blob = await toJpeg(file, 1200, 0.6);
-  return { blob, thumb: await toJpeg(file, 480, 0.75) };
+  return { blob, thumb: await toJpeg(file, 480, 0.7) };
 }
 
 const toBase64 = (blob) => new Promise((resolve, reject) => {
@@ -57,40 +59,64 @@ async function remember(id, blob) {
   await cache?.put(keyOf(id), new Response(blob));
 }
 
-export async function uploadPhoto(file) {
+/** folder: 사진 폴더 아래 만들 하위 폴더 이름 (여행 이름) */
+export async function uploadPhoto(file, folder = '') {
   const { blob, thumb } = await compress(file);
   const saved = await call('uploadPhoto', {
     name: `${Date.now()}.jpg`,
     mime: 'image/jpeg',
     data: await toBase64(blob),
     thumb: await toBase64(thumb),
+    folder,
   });
   await remember(saved.file_id, blob);
   await remember(saved.thumb_id, thumb);
   return saved;
 }
 
+const failed = new Set(); // 이미지로 읽을 수 없는 파일 id
+let missingHandler = null;
+
+/** 사진을 못 불러왔을 때 실행할 함수 등록 (여행 모듈이 원본 드라이브 사진으로 다시 만든다) */
+export const onPhotoMissing = (fn) => { missingHandler = fn; };
+
+async function markFailed(id) {
+  if (failed.has(id)) return;
+  failed.add(id);
+  urls.delete(id);
+  const cache = await openCache();
+  await cache?.delete(keyOf(id));
+  apply();
+  missingHandler?.(id);
+}
+
 async function load(ids) {
   const cache = await openCache();
   const need = [];
   for (const id of ids) {
-    const hit = await cache?.match(keyOf(id));
-    if (hit) urls.set(id, URL.createObjectURL(await hit.blob()));
-    else need.push(id);
+    const blob = await (await cache?.match(keyOf(id)))?.blob();
+    if (blob && blob.type.startsWith('image/')) urls.set(id, URL.createObjectURL(blob));
+    else need.push(id); // 캐시에 없거나 이미지가 아닌 것(예전 오류 파일)은 다시 받는다
   }
   for (let i = 0; i < need.length; i += BATCH) {
     const chunk = need.slice(i, i + BATCH);
     const data = await call('getPhotos', { ids: chunk });
     for (const id of chunk) {
-      if (data[id]) await remember(id, fromBase64(data[id].data, data[id].mime));
+      if (data[id]?.mime?.startsWith('image/')) await remember(id, fromBase64(data[id].data, data[id].mime));
+      else markFailed(id);
     }
   }
 }
 
 function apply() {
   document.querySelectorAll('img[data-photo]').forEach((img) => {
-    const url = urls.get(img.dataset.photo);
-    if (url && img.getAttribute('src') !== url) img.src = url;
+    const id = img.dataset.photo;
+    const url = urls.get(id);
+    img.classList.toggle('is_missing', failed.has(id));
+    if (url && img.getAttribute('src') !== url) {
+      img.onerror = () => markFailed(id); // 깨진 파일이면 엑박 대신 빈 자리로
+      img.src = url;
+    }
   });
 }
 

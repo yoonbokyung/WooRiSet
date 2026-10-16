@@ -4,7 +4,7 @@ import { MODULES } from '../modules/index.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 
-export const familyName = () => setting('family_name') || '우리집';
+export const familyName = () => setting('family_name') || '우리셋';
 
 function greeting() {
   const h = new Date().getHours();

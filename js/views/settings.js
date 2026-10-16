@@ -1,5 +1,6 @@
-import { state, sync, clearCache, saveSetting, periodNotes } from '../store.js';
+import { state, sync, clearCache, saveSetting, periodNotes, setting } from '../store.js';
 import { getConfig, setConfig, hasConfig, shareLink } from '../config.js';
+import { call } from '../api.js';
 import { runTask, toast, confirmSheet } from '../ui.js';
 import { esc, fmtDate } from '../utils.js';
 import { familyName } from './dashboard.js';
@@ -60,6 +61,17 @@ export function settingsView() {
           <label class="field"><span class="field_label">내용</span><input class="field_input" name="label" maxlength="30" placeholder="예) 출산·육아휴직"></label>
           <button type="submit" class="btn btn_sub">기간 메모 추가</button>
         </form>
+      </section>
+      <section class="card">
+        <h2 class="card_title">사진 저장 폴더</h2>
+        <p class="card_desc">앱에서 올린 사진은 구글 드라이브의 이 폴더 아래 <strong>여행 이름 폴더</strong>로 정리돼요. 비워두면 '우리셋 사진' 폴더를 써요. 원본 사진은 옮기지 않아요.</p>
+        <form class="form" data-form="photo" novalidate>
+          <label class="field"><span class="field_label">폴더 이름 또는 링크</span><input class="field_input" name="photo_folder" placeholder="우리셋 사진" value="${esc(setting('photo_folder'))}"></label>
+          <div class="btn_row">
+            <button type="button" class="btn btn_sub" data-action="organize">기존 사진 정리</button>
+            <button type="submit" class="btn">저장</button>
+          </div>
+        </form>
       </section>` : ''}
       <section class="card">
         <h2 class="card_title">데이터</h2>
@@ -109,7 +121,30 @@ export function settingsView() {
         if (await runTask(e.submitter, () => saveNotes([...notes, note]))) toast('기간 메모를 추가했어요');
       });
 
+      const photoForm = el.querySelector('[data-form=photo]');
+      photoForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const value = photoForm.elements.photo_folder.value.trim();
+        if (await runTask(e.submitter, () => saveSetting('photo_folder', value))) {
+          toast(value ? '저장했어요. 기존 사진도 옮기려면 "기존 사진 정리"를 눌러주세요' : "'우리셋 사진' 폴더를 써요");
+        }
+      });
+
       el.addEventListener('click', async (e) => {
+        if (e.target.closest('[data-action=organize]')) {
+          const button = e.target.closest('button');
+          let moved = 0;
+          const ok = await runTask(button, async () => {
+            toast('사진을 여행별 폴더로 옮기는 중이에요…');
+            for (let done = false; !done;) {
+              const result = await call('organizePhotos');
+              moved += result.moved;
+              done = result.done;
+            }
+          });
+          if (ok) toast(moved ? `사진 파일 ${moved}개를 여행별 폴더로 옮겼어요` : '이미 정리되어 있어요');
+          return;
+        }
         const del = e.target.closest('[data-note-delete]');
         if (del && (await confirmSheet('이 기간 메모를 삭제할까요?'))) {
           const index = Number(del.dataset.noteDelete);

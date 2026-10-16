@@ -1,12 +1,32 @@
 import { state, byLedger, upsert, remove, setting, saveSetting } from '../store.js';
 import { openSheet, runTask, toast, confirmSheet } from '../ui.js';
-import { hydratePhotos } from '../photos.js';
+import { hydratePhotos, onPhotoMissing } from '../photos.js';
 import { createMap } from '../map.js';
 import { readPhotos, readDrivePhotos, splitTrips, groupTrips, locatePlaces, mainArea, saveTrip } from '../trip_import.js';
+import { call } from '../api.js';
 import { ICONS } from '../icons.js';
 import { esc, todayStr, fmtDate, fmtDay, parseJson, daysBetween } from '../utils.js';
 
 const KIND = 'travel';
+
+/**
+ * 사진 파일이 깨져 있으면(예전에 오류 페이지가 저장된 경우) 원본 드라이브 사진으로 사본을 다시 만든다.
+ * 원본이 없는(기기에서 올린) 사진은 빈 자리로 둔다. 한 사진당 한 번만 시도
+ */
+const repairing = new Set();
+onPhotoMissing(async (fileId) => {
+  const record = state.records.find((r) => r.type === 'photo' && (r.file_id === fileId || r.thumb_id === fileId));
+  const sourceId = record && parseJson(record.data).source_id;
+  if (!sourceId || repairing.has(record.id)) return;
+  repairing.add(record.id);
+  try {
+    const trip = state.ledgers.find((l) => l.id === record.ledger_id);
+    const ids = await call('importDrivePhoto', { id: sourceId, folder: trip?.name || '' });
+    await upsert('records', { ...record, ...ids }); // 서버가 이전 깨진 파일은 휴지통으로 보낸다
+  } catch {
+    /* 원본도 못 읽으면 빈 자리로 둔다 */
+  }
+});
 
 /* ---------- 계산 ---------- */
 
@@ -70,23 +90,33 @@ function widget(ledgers) {
   if (!trips.length) {
     return `<a class="widget" href="#/m/travel">${head}<p class="widget_sub">사진을 한 번에 올리면 날짜와 장소로 여행 기록을 만들어드려요</p></a>`;
   }
-  const latest = trips[0];
-  const meta = metaOf(latest);
-  const photos = photosOf(latest.id);
-  const year = todayStr().slice(0, 4);
+  const today = todayStr();
+  const year = today.slice(0, 4);
   const thisYear = trips.filter((t) => (metaOf(t).start || '').startsWith(year)).length;
-  return `
-    <a class="widget" href="#/m/travel/${esc(latest.id)}">
-      ${head}
-      <div class="widget_trip">
-        ${coverImg(coverOf(latest, photos), 'widget_trip_cover')}
-        <div class="widget_trip_body">
-          <p class="widget_trip_name">${esc(latest.name)}</p>
-          <p class="widget_sub">${rangeLabel(meta)}</p>
-          <p class="widget_sub">올해 여행 ${thisYear}번 · 전체 ${trips.length}번</p>
+  const card = (trip, label) => {
+    const photos = photosOf(trip.id);
+    return `
+      <a class="widget" href="#/m/travel/${esc(trip.id)}">
+        ${head.replace('<strong class="widget_title">여행</strong>', `<strong class="widget_title">${label}</strong>`)}
+        <div class="widget_trip">
+          ${coverImg(coverOf(trip, photos), 'widget_trip_cover')}
+          <div class="widget_trip_body">
+            <p class="widget_trip_name">${esc(trip.name)}</p>
+            <p class="widget_sub">${rangeLabel(metaOf(trip))}</p>
+            <p class="widget_sub">${[metaOf(trip).area, photos.length ? `사진 ${photos.length}장` : ''].filter(Boolean).map(esc).join(' · ')}</p>
+          </div>
         </div>
-      </div>
-    </a>`;
+      </a>`;
+  };
+
+  // 지난해들의 같은 달에 다녀온 여행 → "N년 전 이맘때" 추억으로 함께 보여준다
+  const memory = trips.find((t) => {
+    const start = metaOf(t).start || '';
+    return start.slice(5, 7) === today.slice(5, 7) && start.slice(0, 4) < year;
+  });
+  return `
+    ${card(trips[0], `최근 여행 · 올해 ${thisYear}번 다녀왔어요`)}
+    ${memory && memory.id !== trips[0].id ? card(memory, `${Number(year) - Number(metaOf(memory).start.slice(0, 4))}년 전 이맘때`) : ''}`;
 }
 
 /* ---------- 여행 목록 (메뉴 첫 화면) ---------- */
@@ -310,10 +340,10 @@ function openTripForm(ledger = null) {
 
 /* ---------- 사진으로 여행 만들기 ---------- */
 
-/** 이미 여행에 들어간 드라이브 원본 사진 id */
+/** 이미 여행에 들어간 드라이브 원본 사진 id + 앱이 만든 사본 id (사진 폴더를 가져오는 폴더 안에 둬도 사본을 다시 가져오지 않게) */
 const importedSourceIds = () => new Set(state.records
   .filter((r) => r.type === 'photo')
-  .map((r) => parseJson(r.data).source_id)
+  .flatMap((r) => [parseJson(r.data).source_id, r.file_id, r.thumb_id])
   .filter(Boolean));
 
 function openImport(trip = null) {

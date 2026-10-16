@@ -2,7 +2,7 @@ import { state, byLedger, upsert, tagOf, refresh } from '../store.js';
 import { openSheet, runTask, toast, bindAmountInput } from '../ui.js';
 import { openEntryForm } from '../forms.js';
 import { ICONS } from '../icons.js';
-import { esc, pad, todayStr, addMonths, splitMonths, fmtDate, manwon, sum, byDateDesc, parseAmount } from '../utils.js';
+import { esc, pad, todayStr, addMonths, splitMonths, fmtDate, manwon, sum, byDateDesc, parseAmount, daysBetween } from '../utils.js';
 
 const KIND = 'rent';
 const FILTERS = [['all', '전체'], ['rent', '월세'], ['etc', '보증금·지출']];
@@ -95,6 +95,7 @@ function widget(ledgers) {
         <div class="widget_row">
           <div>
             <p class="widget_value${a.unpaid.length ? ' is_danger' : ''}">${a.unpaid.length ? manwon(a.unpaidAmount) : a.next ? `${fmtDate(a.next.due).slice(5)} 입금 예정` : '계약 종료'}</p>
+            ${!a.unpaid.length && a.next ? `<p class="widget_sub">D-${daysBetween(todayStr(), a.next.due)} · ${periodLabel(a.next.month, a.next.contract)}분</p>` : ''}
             <p class="widget_sub">월세 ${manwon(a.current.rent)} · 보증금 ${manwon(a.current.deposit)}</p>
           </div>
           ${badge}

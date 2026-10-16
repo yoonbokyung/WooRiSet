@@ -15,6 +15,29 @@
 .widget_sub{font-size:var(--text-small);color:var(--color-text-muted);}
 .widget_row{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;}
 .widget_bars{margin-top:15px;}
+.widget_label{font-size:var(--text-small);color:var(--color-text-muted);}
+.widget_stats{display:grid;margin-top:15px;padding-top:15px;border-top:1px solid var(--color-border);grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.widget_stats.is_grid{margin-top:0;padding-top:0;border-top:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 10px;}
+.widget_stat{display:flex;min-width:0;flex-direction:column;gap:5px;}
+.widget_stat_label{font-size:var(--text-caption);color:var(--color-text-muted);}
+.widget_stat_value{overflow:hidden;font-size:var(--text-body);font-weight:700;white-space:nowrap;text-overflow:ellipsis;}
+
+/* mini chart */
+.mini_chart{display:flex;height:90px;margin-top:20px;gap:10px;}
+.mini_chart_col{display:flex;min-width:0;flex:1;flex-direction:column;align-items:center;gap:5px;}
+.mini_chart_track{display:flex;width:100%;flex:1;align-items:flex-end;justify-content:center;}
+.mini_chart_bar{width:100%;max-width:25px;border-radius:4px 4px 0 0;background:var(--color-primary-soft);}
+.mini_chart_bar.is_current{background:var(--color-primary);}
+.mini_chart_label{font-size:var(--text-tiny);color:var(--color-text-muted);}
+
+/* recent list */
+.recent_row{display:flex;padding:10px 0;align-items:center;gap:10px;}
+.recent_row+.recent_row{border-top:1px solid var(--color-border);}
+.recent_date{width:40px;font-size:var(--text-caption);color:var(--color-text-muted);flex-shrink:0;}
+.recent_body{display:flex;min-width:0;flex:1;flex-direction:column;}
+.recent_title{overflow:hidden;font-size:var(--text-small);font-weight:600;color:var(--color-text-primary);white-space:nowrap;text-overflow:ellipsis;}
+.recent_sub{overflow:hidden;font-size:var(--text-caption);color:var(--color-text-muted);white-space:nowrap;text-overflow:ellipsis;}
+.recent_amount{font-size:var(--text-small);font-weight:700;white-space:nowrap;}
 .widget_trip{display:flex;align-items:center;gap:15px;}
 .widget_trip_cover{display:flex;overflow:hidden;width:80px;height:80px;border-radius:16px;background:var(--color-surface-sub);color:var(--color-text-muted);object-fit:cover;align-items:center;justify-content:center;flex-shrink:0;}
 .widget_trip_body{min-width:0;flex:1;}
@@ -44,7 +67,17 @@
 
 /* household */
 .month_nav{display:flex;align-items:center;justify-content:center;gap:10px;}
-.month_nav_label{min-width:120px;font-size:var(--text-title);font-weight:800;text-align:center;}
+.month_nav_label{display:inline-flex;min-width:120px;padding:5px 10px;border-radius:12px;font-size:var(--text-title);font-weight:800;align-items:center;justify-content:center;gap:5px;}
+.month_nav_label:active{background:var(--color-border);}
+.month_nav_caret{font-size:var(--text-caption);color:var(--color-text-muted);}
+
+/* month picker */
+.month_pick_year+.month_pick_year{margin-top:20px;}
+.month_pick_label{margin-bottom:10px;font-size:var(--text-small);font-weight:700;color:var(--color-text-secondary);}
+.month_pick_grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.month_pick_btn{height:45px;border-radius:12px;background:var(--color-surface-sub);font-size:var(--text-body);font-weight:600;color:var(--color-text-primary);}
+.month_pick_btn.is_active{background:var(--color-primary);color:var(--color-on-primary);}
+.month_pick_btn:disabled{opacity:0.3;cursor:default;}
 .day_group_head{display:flex;padding-top:15px;font-size:var(--text-caption);font-weight:600;color:var(--color-text-muted);justify-content:space-between;}
 .day_group:first-child .day_group_head{padding-top:0;}
 .period_note{display:flex;padding:10px 15px;border-radius:12px;background:var(--color-primary-soft);font-size:var(--text-small);font-weight:700;color:var(--color-primary);align-items:center;justify-content:space-between;gap:10px;}
@@ -130,6 +163,14 @@
   .widget_icon svg{width:5.1282vw;height:5.1282vw;}
   .widget_row{gap:2.5641vw;}
   .widget_bars{margin-top:3.8462vw;}
+  .widget_stats{margin-top:3.8462vw;padding-top:3.8462vw;gap:2.5641vw;}
+  .widget_stats.is_grid{gap:3.8462vw 2.5641vw;}
+  .widget_stat{gap:1.2821vw;}
+  .mini_chart{height:23.0769vw;margin-top:5.1282vw;gap:2.5641vw;}
+  .mini_chart_col{gap:1.2821vw;}
+  .mini_chart_bar{max-width:6.4103vw;}
+  .recent_row{padding:2.5641vw 0;gap:2.5641vw;}
+  .recent_date{width:10.2564vw;}
   .widget_trip{gap:3.8462vw;}
   .widget_trip_cover{width:20.5128vw;height:20.5128vw;}
   .rent_legend{margin-bottom:3.8462vw;gap:3.8462vw;}
@@ -143,7 +184,11 @@
   .rent_filter{margin-bottom:1.2821vw;}
   .rent_more{margin-top:2.5641vw;}
   .month_nav{gap:2.5641vw;}
-  .month_nav_label{min-width:30.7692vw;}
+  .month_nav_label{min-width:30.7692vw;padding:1.2821vw 2.5641vw;gap:1.2821vw;}
+  .month_pick_year+.month_pick_year{margin-top:5.1282vw;}
+  .month_pick_label{margin-bottom:2.5641vw;}
+  .month_pick_grid{gap:2.5641vw;}
+  .month_pick_btn{height:11.5385vw;}
   .day_group_head{padding-top:3.8462vw;}
   .period_note{padding:2.5641vw 3.8462vw;gap:2.5641vw;}
   .widget .period_note{margin-bottom:1.2821vw;}

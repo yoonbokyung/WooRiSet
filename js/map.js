@@ -15,7 +15,8 @@ export function createMap(el, { points = [], markers = [] } = {}) {
     return null;
   }
   const { L } = window;
-  const map = L.map(el, { zoomControl: false, scrollWheelZoom: false });
+  const map = L.map(el, { zoomControl: false, scrollWheelZoom: true });
+  L.control.zoom({ position: 'topright', zoomInTitle: '확대', zoomOutTitle: '축소' }).addTo(map);
   map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
   L.tileLayer(TILE_URL, { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
   if (points.length > 1) L.polyline(points.map((p) => [p.lat, p.lng]), { className: 'map_route' }).addTo(map);

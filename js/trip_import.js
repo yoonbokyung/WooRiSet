@@ -142,7 +142,7 @@ export async function saveTrip({ trip = null, name, photos, onProgress }) {
       const p = queue.shift();
       try {
         // 내 기기 사진은 압축해서 올리고, 드라이브 사진은 서버가 미리보기로 사본을 만든다
-        const ids = p.file ? await uploadPhoto(p.file) : await call('importDrivePhoto', { id: p.sourceId });
+        const ids = p.file ? await uploadPhoto(p.file, ledger.name) : await call('importDrivePhoto', { id: p.sourceId, folder: ledger.name });
         rows.push({
           ledger_id: ledger.id, type: 'photo', date: p.date, title: '', memo: '', by, ...ids,
           data: JSON.stringify({ time: p.time, lat: p.lat, lng: p.lng, place: p.place || '', area: p.area || '', source_id: p.sourceId || '' }),
