@@ -567,7 +567,7 @@ function openSearch(ledger) {
   openSheet({
     title: '내역 검색',
     body: `
-      <input class="field_input" type="search" name="q" placeholder="예) 관리비, 로로앤미, 50000" autocomplete="off" aria-label="검색어">
+      <input class="field_input" type="search" name="q" placeholder="예) 관리비, 기저귀, 50000" autocomplete="off" aria-label="검색어">
       <div class="search_result">${searchHtml(ledger, '')}</div>`,
     onMount(body, close) {
       const input = body.querySelector('[name=q]');
