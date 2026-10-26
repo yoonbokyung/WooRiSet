@@ -45,8 +45,8 @@ function parseCsv(text) {
   return rows;
 }
 
-/** CSV 글 → 새로 넣을 records와 통계. known: 이미 넣은 주문 상품 키 */
-export function buildCoupangRecords(text, ledgerId, known) {
+/** CSV 글 → 새로 넣을 records와 통계. known: 이미 넣은 주문 상품 키, overrides: 앱에서 바꾼 상품명 → 카테고리 */
+export function buildCoupangRecords(text, ledgerId, known, overrides = {}) {
   const [head, ...rows] = parseCsv(text);
   const col = (name) => head?.indexOf(name) ?? -1;
   const idx = { at: col('주문일시'), order: col('주문번호'), name: col('상품명'), option: col('옵션'), qty: col('수량'), price: col('결제단가'), cancel: col('취소수량'), back: col('반품수량') };
@@ -62,7 +62,7 @@ export function buildCoupangRecords(text, ledgerId, known) {
     const qty = Math.max(Number(r[idx.qty]) - Number(r[idx.cancel] || 0) - Number(r[idx.back] || 0), 0);
     const amount = qty * Number(r[idx.price]);
     if (!amount) { stats.canceled += 1; return; }
-    const category = classifyProduct(r[idx.name]);
+    const category = overrides[r[idx.name]] || classifyProduct(r[idx.name]);
     fresh.push({
       ledger_id: ledgerId,
       type: COUPANG_TYPE,

@@ -1,11 +1,11 @@
-import { state, byLedger, refresh, tagOf, setting, saveSetting, insertMany, removeMany, notesFor } from '../store.js';
+import { state, byLedger, refresh, tagOf, setting, saveSetting, insertMany, removeMany, notesFor, upsert, categoriesOf } from '../store.js';
 import { getConfig } from '../config.js';
 import { openEntryForm } from '../forms.js';
 import { openSheet, runTask, toast } from '../ui.js';
 import { extractSms, splitSmsText, parseKbSms, classify, applyPayrollDeductions, refKey, KB_SENDER } from '../sms_rules.js';
 import { buildCoupangRecords, COUPANG_TYPE } from '../coupang.js';
 import { ICONS } from '../icons.js';
-import { esc, pad, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson } from '../utils.js';
+import { esc, pad, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson, daysBetween } from '../utils.js';
 
 const KIND = 'household';
 const TOP_CATEGORIES = 3;
@@ -123,6 +123,23 @@ const bars = (rows, max, total) => rows.map(([name, value, data]) => {
   return `<li>${data ? `<button type="button" class="cat_bar_btn" ${data}>${inner}</button>` : inner}</li>`;
 }).join('');
 
+/* ---------- 문자 수집 점검 ---------- */
+
+const SMS_STALE_DAYS = 5; // 은행 문자 내역이 이만큼 없으면 폰 자동 전송을 확인하라고 알린다
+
+/** 은행 문자로 들어온 마지막 내역이 며칠 전인지 (문자 내역이 없으면 '') */
+function smsWarning(ledgerId, withButton) {
+  const last = byLedger('entries', ledgerId).filter((e) => String(e.ref || '').startsWith('kb|')).reduce((max, e) => (e.date > max ? e.date : max), '');
+  const days = last ? daysBetween(last, todayStr()) : 0;
+  if (days < SMS_STALE_DAYS) return '';
+  return `
+    <div class="alert">
+      <strong>은행 문자가 ${days}일째 안 들어왔어요</strong>
+      <span>마지막 내역 ${fmtDate(last)} · 폰의 자동 전송(MacroDroid)이 켜져 있는지 확인해주세요</span>
+      ${withButton ? '<button type="button" class="alert_btn" data-action="import">문자 직접 가져오기 ›</button>' : ''}
+    </div>`;
+}
+
 /* ---------- 홈 위젯 ---------- */
 
 const RECENT_COUNT = 5;
@@ -170,6 +187,7 @@ function widget(ledgers) {
     <a class="widget" href="${link}">
       <div class="widget_head"><span class="widget_icon">${ICONS.wallet}</span><strong class="widget_title">${Number(month.slice(5))}월 가계부</strong>${ICONS.next}</div>
       ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)}</p>`).join('')}
+      ${smsWarning(ledger.id, false)}
       <p class="widget_label">생활 지출</p>
       <p class="widget_value">${won(s.expense)}</p>
       ${compareText(s, prev) ? `<p class="widget_sub">${compareText(s, prev)}</p>` : ''}
@@ -214,9 +232,9 @@ function accountTag(name) {
   return `<span class="account_tag is_acc${(index % 2) + 1}">${esc(name)}</span>`;
 }
 
-function entryItem(e) {
+function entryItem(e, withDate = false) {
   const isRent = e.ledger_id && state.ledgers.find((l) => l.id === e.ledger_id)?.kind === 'rent';
-  const sub = [isRent ? '월세 메뉴' : '', e.memo, e.by].filter(Boolean).join(' · ');
+  const sub = [withDate ? fmtDate(e.date).slice(5) : '', isRent ? '월세 메뉴' : '', e.memo, e.by].filter(Boolean).join(' · ');
   const account = isRent ? '' : accountTag(e.account);
   const tag = isRent ? '' : tagOfEntry(e);
   return `
@@ -242,7 +260,7 @@ function groupedList(list, empty) {
     return `
       <li class="day_group">
         <div class="day_group_head"><span>${fmtDay(date)}</span><span>${spent ? `-${won(spent)}` : ''}</span></div>
-        <ul>${items.map(entryItem).join('')}</ul>
+        <ul>${items.map((e) => entryItem(e)).join('')}</ul>
       </li>`;
   }).join('');
   return groups ? `<ul>${groups}</ul>` : `<p class="empty">${empty}</p>`;
@@ -272,21 +290,20 @@ function openDrill(s, key, monthLabel) {
         ${groupedList(list, '해당하는 내역이 없어요')}` : ''}
       ${orders.length ? `
         <p class="drill_note">쿠팡 주문 ${orders.length}건 · ${won(sum(orders, (o) => o.amount))} (카드대금·생활비 이체에서 옮김)</p>
-        <ul>
-          ${orders.sort(byDateDesc).map((o) => `
-            <li class="coupang_item">
-              <span class="coupang_item_date">${fmtDate(o.date).slice(5)}</span>
-              <span class="coupang_item_name">${esc(o.title)}</span>
-              <span class="coupang_item_amount">${won(o.amount)}</span>
-            </li>`).join('')}
-        </ul>` : ''}`,
+        <ul>${orders.sort(byDateDesc).map((o) => coupangRow(o)).join('')}</ul>` : ''}`,
     onMount(body, close) {
       body.addEventListener('click', (e) => {
+        const coupang = e.target.closest('[data-coupang]')?.dataset.coupang;
+        if (coupang) {
+          close();
+          openCoupangCategory(coupang);
+          return;
+        }
         const id = e.target.closest('[data-entry]')?.dataset.entry;
         if (!id) return;
         const entry = state.entries.find((x) => x.id === id);
         close();
-        openEntryForm({ ledger: state.ledgers.find((l) => l.id === entry.ledger_id), entry });
+        editEntry(state.ledgers.find((l) => l.id === entry.ledger_id), entry);
       });
     },
   });
@@ -319,11 +336,13 @@ function view(ledger) {
   return {
     html: `
       ${modeToggle('month')}
+      <button type="button" class="search_btn" data-action="search">${ICONS.search}<span>거래처·메모·금액으로 찾기</span></button>
       <div class="month_nav">
         <button type="button" class="icon_btn" data-step="-1" aria-label="이전 달">${ICONS.back}</button>
         <button type="button" class="month_nav_label" data-action="pick_month" aria-label="${fmtMonth(month)}, 년·월 직접 선택">${fmtMonth(month)}<span class="month_nav_caret" aria-hidden="true">▾</span></button>
         <button type="button" class="icon_btn" data-step="1" aria-label="다음 달"${month >= thisMonth() ? ' disabled' : ''}>${ICONS.next}</button>
       </div>
+      ${smsWarning(ledger.id, true)}
       ${notesFor(month).map((n) => `<p class="period_note">${esc(n.label)} <span class="period_note_range">${fmtDate(n.from)}${n.to && n.to !== n.from ? ` ~ ${fmtDate(n.to)}` : ''}</span></p>`).join('')}
       ${accounts.length ? `
         <div class="chip_row">
@@ -386,14 +405,189 @@ function view(ledger) {
           refresh();
         }
         if (drill) openDrill(s, drill, monthLabel);
-        if (action === 'add') openEntryForm({ ledger, defaults: { date: month === thisMonth() ? todayStr() : `${month}-01`, account } });
+        if (action === 'add') editEntry(ledger, null, { date: month === thisMonth() ? todayStr() : `${month}-01`, account });
+        if (action === 'search') openSearch(ledger);
         if (action === 'import') openSmsImport(ledger);
         if (action === 'coupang') openCoupangImport(ledger);
         if (action === 'pick_month') openMonthPicker(ledger, month, account);
-        if (entry) openEntryForm({ ledger, entry: state.entries.find((x) => x.id === entry) });
+        if (entry) editEntry(ledger, state.entries.find((x) => x.id === entry));
       });
     },
   };
+}
+
+/* ---------- 내역 수정 · 분류 규칙 ---------- */
+
+/** 메모(거래처)에서 규칙 글자 추천: 직접 붙인 ' - 메모'와 끝의 회차 숫자를 뗀다 (라이프PL115 → 라이프PL) */
+const payeeKey = (memo) => String(memo || '').split(' - ')[0].replace(/[\d\s,-]+$/, '').trim();
+
+/** 같은 방향(입금/출금)이고 메모에 match가 들어간, 카테고리가 다른 내역 */
+const ruleTargets = (ledgerId, match, flow, category, exceptId) => byLedger('entries', ledgerId)
+  .filter((e) => e.flow === flow && e.id !== exceptId && e.category !== category && String(e.memo || '').includes(match));
+
+/** 내역 수정 폼 아래 '이 거래처는 항상 이 카테고리로' */
+const ruleExtra = (ledger, entry, rule) => (box, ctx) => {
+  box.innerHTML = `
+    <label class="check_field"><input type="checkbox" name="always"> 이 거래처는 항상 이 카테고리로</label>
+    <label class="field" data-rule hidden>
+      <span class="field_label">거래처 이름에 이 글자가 들어가면</span>
+      <input class="field_input" name="rule_match" maxlength="30" value="${esc(rule.match)}">
+      <span class="field_hint" data-rule-hint></span>
+    </label>`;
+  const field = box.querySelector('[data-rule]');
+  const hint = box.querySelector('[data-rule-hint]');
+  const flowOf = () => box.closest('form').querySelector('.segment_btn.is_active')?.dataset.flow || 'out';
+  const draw = () => {
+    field.hidden = !rule.on;
+    if (!rule.on) return;
+    const n = rule.match ? ruleTargets(ledger.id, rule.match, flowOf(), ctx.getCategory(), entry?.id).length : 0;
+    hint.textContent = rule.match ? `앞으로 들어올 문자도 '${ctx.getCategory()}'로 분류하고, 지난 내역 ${n}건도 함께 바꿔요` : '규칙에 쓸 글자를 입력해주세요';
+  };
+  box.querySelector('[name=always]').addEventListener('change', (e) => { rule.on = e.target.checked; draw(); });
+  box.querySelector('[name=rule_match]').addEventListener('input', (e) => { rule.match = e.target.value.trim(); draw(); });
+  ctx.onChange(draw);
+  return { read: () => (rule.on && !rule.match ? { error: '규칙에 쓸 거래처 글자를 입력해주세요' } : {}) };
+};
+
+/** 규칙 저장(같은 글자·방향의 단순 규칙은 덮어씀) + 지난 내역 일괄 변경 */
+async function applyRule(ledger, row, rule) {
+  if (!rule.on || !rule.match) return;
+  try {
+    const rules = parseJson(setting('sms_rules'), [])
+      .filter((r) => !(r.match === rule.match && (r.flow || row.flow) === row.flow && !r.account && !r.minAmount && !r.maxAmount && !r.monthEndDays));
+    rules.unshift({ match: rule.match, flow: row.flow, category: row.category });
+    await saveSetting('sms_rules', JSON.stringify(rules));
+    const targets = ruleTargets(ledger.id, rule.match, row.flow, row.category, row.id);
+    for (let i = 0; i < targets.length; i++) {
+      toast(`지난 내역 바꾸는 중… ${i + 1}/${targets.length}`);
+      await upsert('entries', { ...targets[i], category: row.category });
+    }
+    toast(targets.length ? `규칙을 저장하고 지난 내역 ${targets.length}건을 '${row.category}'로 바꿨어요` : '규칙을 저장했어요');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/** 가계부 내역 입력·수정 (월세 장부 내역이면 기본 폼) */
+function editEntry(ledger, entry = null, defaults = {}) {
+  if (ledger.kind !== KIND) return openEntryForm({ ledger, entry, defaults });
+  const rule = { on: false, match: payeeKey(entry?.memo) };
+  return openEntryForm({ ledger, entry, defaults, extra: ruleExtra(ledger, entry, rule), afterSave: (row) => applyRule(ledger, row, rule) });
+}
+
+/* ---------- 쿠팡 상품 분류 바꾸기 ---------- */
+
+const coupangRow = (o) => `
+  <li>
+    <button type="button" class="coupang_item" data-coupang="${esc(o.id)}">
+      <span class="coupang_item_date">${fmtDate(o.date).slice(o.withYear ? 2 : 5)}</span>
+      <span class="coupang_item_name">${esc(o.title)}</span>
+      <span class="coupang_item_amount">${won(o.amount)}</span>
+    </button>
+  </li>`;
+
+function openCoupangCategory(id) {
+  const record = state.records.find((r) => r.id === id);
+  if (!record) return;
+  const current = parseJson(record.data, {}).category;
+  const same = state.records.filter((r) => r.type === COUPANG_TYPE && r.title === record.title);
+  const names = categoriesOf(KIND, 'out').filter((c) => !c.tag).map((c) => c.name);
+  openSheet({
+    title: '쿠팡 상품 분류',
+    body: `
+      <form class="form" novalidate>
+        <p class="card_desc">${esc(record.title)}</p>
+        <label class="field"><span class="field_label">카테고리</span>
+          <select class="field_input" name="category">${names.map((n) => `<option value="${esc(n)}"${n === current ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        </label>
+        ${same.length > 1 ? `<label class="check_field"><input type="checkbox" name="all" checked> 같은 상품 ${same.length}건 모두 바꾸기</label>` : ''}
+        <p class="field_hint">다음에 쿠팡 주문을 가져올 때도 이 상품은 이 카테고리로 넣어요</p>
+        <button type="submit" class="btn">저장</button>
+      </form>`,
+    onMount(body, close) {
+      const form = body.querySelector('form');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const category = form.elements.category.value;
+        const targets = form.elements.all?.checked ? same : [record];
+        const ok = await runTask(e.submitter, async () => {
+          const overrides = parseJson(setting('coupang_overrides'), {});
+          overrides[record.title] = category;
+          await saveSetting('coupang_overrides', JSON.stringify(overrides));
+          for (const r of targets) await upsert('records', { ...r, data: JSON.stringify({ ...parseJson(r.data, {}), category }) });
+        });
+        if (ok) {
+          close();
+          toast(`${targets.length}건을 '${category}'로 바꿨어요`);
+        }
+      });
+    },
+  });
+}
+
+/* ---------- 내역 검색 ---------- */
+
+const SEARCH_LIMIT = 100;
+
+function searchHtml(ledger, q) {
+  if (!q) return '<p class="empty">거래처·메모·카테고리·금액을 입력해주세요</p>';
+  const word = q.toLowerCase();
+  const digits = q.replace(/[,원\s]/g, '');
+  const isAmount = /^\d+$/.test(digits);
+  const hit = (e) => [e.memo, e.category, e.account].some((v) => String(v || '').toLowerCase().includes(word)) || (isAmount && String(e.amount) === digits);
+  const list = byLedger('entries', ledger.id).filter(hit).sort(byDateDesc);
+  const orders = byLedger('records', ledger.id)
+    .filter((r) => r.type === COUPANG_TYPE && String(r.title).toLowerCase().includes(word))
+    .map((r) => ({ ...r, ...parseJson(r.data, {}), withYear: true }))
+    .sort(byDateDesc);
+  if (!list.length && !orders.length) return '<p class="empty">찾는 내역이 없어요</p>';
+  const out = sum(list.filter((e) => e.flow === 'out'), (e) => e.amount);
+  const inc = sum(list.filter((e) => e.flow === 'in'), (e) => e.amount);
+  const months = new Map();
+  list.slice(0, SEARCH_LIMIT).forEach((e) => {
+    const m = e.date.slice(0, 7);
+    if (!months.has(m)) months.set(m, []);
+    months.get(m).push(e);
+  });
+  return `
+    ${list.length ? `
+      <p class="drill_total">${list.length}건${out ? ` · 지출 ${won(out)}` : ''}${inc ? ` · 수입 ${won(inc)}` : ''}</p>
+      ${list.length > SEARCH_LIMIT ? `<p class="drill_note">최근 ${SEARCH_LIMIT}건만 보여요</p>` : ''}
+      <ul>${[...months].map(([m, items]) => `
+        <li class="day_group">
+          <div class="day_group_head"><span>${fmtMonth(m)}</span><span>${items.length}건</span></div>
+          <ul>${items.map((e) => entryItem(e, true)).join('')}</ul>
+        </li>`).join('')}</ul>` : ''}
+    ${orders.length ? `
+      <p class="drill_note">쿠팡 주문 ${orders.length}건 · ${won(sum(orders, (o) => o.amount))}</p>
+      <ul>${orders.slice(0, SEARCH_LIMIT).map(coupangRow).join('')}</ul>` : ''}`;
+}
+
+function openSearch(ledger) {
+  openSheet({
+    title: '내역 검색',
+    body: `
+      <input class="field_input" type="search" name="q" placeholder="예) 관리비, 로로앤미, 50000" autocomplete="off" aria-label="검색어">
+      <div class="search_result">${searchHtml(ledger, '')}</div>`,
+    onMount(body, close) {
+      const input = body.querySelector('[name=q]');
+      const out = body.querySelector('.search_result');
+      let timer;
+      input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { out.innerHTML = searchHtml(ledger, input.value.trim()); }, 150);
+      });
+      out.addEventListener('click', (e) => {
+        const coupang = e.target.closest('[data-coupang]')?.dataset.coupang;
+        const id = e.target.closest('[data-entry]')?.dataset.entry;
+        if (!coupang && !id) return;
+        close();
+        if (coupang) openCoupangCategory(coupang);
+        else editEntry(ledger, state.entries.find((x) => x.id === id));
+      });
+      input.focus();
+    },
+  });
 }
 
 /* ---------- 연도별 통계 ---------- */
@@ -805,7 +999,7 @@ function openCoupangImport(ledger) {
         const file = e.target.files[0];
         if (!file) return;
         const card = box.querySelector('[name=card]').value.trim();
-        const result = buildCoupangRecords(await file.text(), ledger.id, known);
+        const result = buildCoupangRecords(await file.text(), ledger.id, known, parseJson(setting('coupang_overrides'), {}));
         if (!result) return toast('쿠팡 주문내역 CSV가 아니에요', true);
         analyze(box, result, card);
       });

@@ -2,13 +2,23 @@ import { state, sync, clearCache, saveSetting, periodNotes, setting } from '../s
 import { getConfig, setConfig, hasConfig, shareLink } from '../config.js';
 import { call } from '../api.js';
 import { runTask, toast, confirmSheet } from '../ui.js';
-import { esc, fmtDate } from '../utils.js';
+import { esc, fmtDate, won, parseJson } from '../utils.js';
 import { familyName } from './dashboard.js';
 import { getModule } from '../modules/index.js';
+
+/** 분류 규칙 조건 요약: 출금 · 보경통장 · 125,000원~160,000원 */
+const ruleText = (r) => [
+  { in: '입금', out: '출금' }[r.flow] || '',
+  r.account || '',
+  r.minAmount || r.maxAmount ? `${r.minAmount ? won(r.minAmount) : ''}~${r.maxAmount ? won(r.maxAmount) : ''}` : '',
+  r.monthEndDays ? `말일 ${r.monthEndDays}일 안` : '',
+  r.notRound ? '끝자리까지 있는 금액' : '',
+].filter(Boolean).join(' · ');
 
 export function settingsView() {
   const c = getConfig();
   const notes = periodNotes();
+  const rules = parseJson(setting('sms_rules'), []);
   const saveNotes = (list) => saveSetting('period_notes', JSON.stringify(list.sort((a, b) => a.from.localeCompare(b.from))));
   return {
     title: '설정',
@@ -62,6 +72,18 @@ export function settingsView() {
           <label class="field"><span class="field_label">내용</span><input class="field_input" name="label" maxlength="30" placeholder="예) 출산·육아휴직"></label>
           <button type="submit" class="btn btn_sub">기간 메모 추가</button>
         </form>
+      </section>
+      <section class="card">
+        <h2 class="card_title">자동 분류 규칙 <span class="field_hint">${rules.length}개</span></h2>
+        <p class="card_desc">은행 문자를 가져올 때 기본 분류보다 먼저 적용돼요(위에 있는 규칙부터). 가계부 내역 수정에서 '이 거래처는 항상 이 카테고리로'를 체크하면 추가돼요.</p>
+        ${rules.length ? `<ul class="note_list">${rules.map((r, i) => `
+          <li class="list_row note_row">
+            <span class="list_item_body">
+              <span class="list_item_title">${esc(r.match)} → ${esc(r.category)}</span>
+              ${ruleText(r) ? `<span class="list_item_sub">${esc(ruleText(r))}</span>` : ''}
+            </span>
+            <button type="button" class="text_btn" data-rule-delete="${i}" aria-label="${esc(r.match)} 규칙 삭제">삭제</button>
+          </li>`).join('')}</ul>` : '<p class="empty">아직 규칙이 없어요</p>'}
       </section>
       ${getModule('travel') ? `<section class="card">
         <h2 class="card_title">사진 저장 폴더</h2>
@@ -145,6 +167,11 @@ export function settingsView() {
           });
           if (ok) toast(moved ? `사진 파일 ${moved}개를 여행별 폴더로 옮겼어요` : '이미 정리되어 있어요');
           return;
+        }
+        const ruleDel = e.target.closest('[data-rule-delete]');
+        if (ruleDel && (await confirmSheet('이 분류 규칙을 삭제할까요? 이미 분류된 내역은 그대로예요.'))) {
+          const index = Number(ruleDel.dataset.ruleDelete);
+          if (await runTask(null, () => saveSetting('sms_rules', JSON.stringify(rules.filter((_, i) => i !== index))))) toast('삭제했어요');
         }
         const del = e.target.closest('[data-note-delete]');
         if (del && (await confirmSheet('이 기간 메모를 삭제할까요?'))) {

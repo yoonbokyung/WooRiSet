@@ -25,7 +25,6 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 .card_title{display:flex;margin-bottom:15px;font-size:var(--text-heading);font-weight:700;align-items:center;justify-content:space-between;gap:10px;}
 .card_desc{margin-bottom:15px;font-size:var(--text-small);color:var(--color-text-secondary);}
 .text_btn{padding:5px;font-size:var(--text-small);font-weight:600;color:var(--color-text-muted);}
-.section_label{margin:10px 0 -5px 5px;font-size:var(--text-small);font-weight:700;color:var(--color-text-secondary);}
 
 /* hero number */
 .hero_link{display:block;width:100%;text-align:left;}
@@ -65,6 +64,8 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 
 /* alert */
 .alert{display:flex;margin-top:15px;padding:15px;border-radius:12px;background:var(--color-danger-soft);font-size:var(--text-small);color:var(--color-danger);flex-direction:column;gap:5px;}
+.page > .alert{margin-top:0;}
+.alert_btn{font-weight:700;color:var(--color-danger);text-align:left;align-self:flex-start;}
 
 /* list */
 .list_row+.list_row{border-top:1px solid var(--color-border);}
@@ -92,6 +93,8 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 
 /* form */
 .form{display:flex;flex-direction:column;gap:15px;}
+.field_extra{display:flex;flex-direction:column;gap:15px;}
+.field_extra:empty{display:none;}
 .field{display:flex;min-width:0;flex-direction:column;gap:5px;}
 .field_label{font-size:var(--text-small);font-weight:600;color:var(--color-text-secondary);}
 .field_input{width:100%;height:50px;padding:0 15px;border:1px solid var(--color-border);border-radius:12px;background:var(--color-surface);font-size:var(--text-input);}
@@ -128,6 +131,10 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 .toast.is_show{opacity:1;transform:translate(-50%,0);}
 .toast.is_error{background:var(--color-danger);color:var(--color-text-white);}
 
+/* update bar */
+.update_bar{display:flex;position:fixed;right:20px;bottom:calc(85px + env(safe-area-inset-bottom));left:20px;z-index:150;max-width:440px;margin:0 auto;padding:10px 10px 10px 20px;border-radius:15px;background:var(--color-text-primary);font-size:var(--text-small);font-weight:600;color:var(--color-bg);box-shadow:0 5px 15px var(--color-shadow);align-items:center;justify-content:space-between;gap:10px;}
+.update_bar_btn{padding:5px 15px;border-radius:10px;background:var(--color-primary);font-weight:700;color:var(--color-on-primary);flex-shrink:0;}
+
 /* bar */
 .cat_bars{display:flex;flex-direction:column;gap:15px;}
 .cat_bar_btn{display:block;width:100%;text-align:left;}
@@ -137,9 +144,6 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 .cat_bar_value{color:var(--color-text-secondary);}
 .cat_bar_track{overflow:hidden;height:10px;border-radius:5px;background:var(--color-surface-sub);}
 .cat_bar_fill{height:100%;border-radius:4px;background:var(--color-primary);}
-
-/* dashed button */
-.dashed_btn{width:100%;height:55px;border:1px dashed var(--color-border);border-radius:20px;font-weight:600;color:var(--color-text-muted);}
 
 /* photo */
 img[data-photo]:not([src]),img.is_missing{visibility:hidden;}
@@ -164,7 +168,6 @@ img[data-photo]:not([src]),img.is_missing{visibility:hidden;}
   .card_title{margin-bottom:3.8462vw;gap:2.5641vw;}
   .card_desc{margin-bottom:3.8462vw;}
   .text_btn{padding:1.2821vw;}
-  .section_label{margin:2.5641vw 0 -1.2821vw 1.2821vw;}
   .hero_value{margin-top:1.2821vw;}
   .hero_sub{margin-top:1.2821vw;}
   .stat_grid{margin-top:5.1282vw;}
@@ -183,6 +186,7 @@ img[data-photo]:not([src]),img.is_missing{visibility:hidden;}
   .segment{padding:1.2821vw;gap:1.2821vw;}
   .segment_btn{height:10.2564vw;}
   .form{gap:3.8462vw;}
+  .field_extra{gap:3.8462vw;}
   .field{gap:1.2821vw;}
   .field_input{height:12.8205vw;padding:0 3.8462vw;}
   .field_textarea{height:25.641vw;padding:3.8462vw;}
@@ -197,9 +201,10 @@ img[data-photo]:not([src]),img.is_missing{visibility:hidden;}
   .sheet_head{margin-bottom:3.8462vw;}
   .confirm_text{margin-bottom:3.8462vw;}
   .toast{max-width:calc(100% - 10.2564vw);padding:2.5641vw 5.1282vw;}
+  .update_bar{right:5.1282vw;left:5.1282vw;padding:2.5641vw 2.5641vw 2.5641vw 5.1282vw;gap:2.5641vw;}
+  .update_bar_btn{padding:1.2821vw 3.8462vw;}
   .cat_bars{gap:3.8462vw;}
   .cat_bar_head{margin-bottom:1.2821vw;gap:2.5641vw;}
   .cat_bar_track{height:2.5641vw;}
-  .dashed_btn{height:14.1026vw;}
   .empty{padding:10.2564vw 0;}
 }

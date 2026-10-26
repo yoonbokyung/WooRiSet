@@ -1,11 +1,12 @@
 /**
  * 오프라인 지원용 서비스 워커
  * 네트워크 우선 → 실패하면 캐시. 코드를 고치면 바로 반영되고, 오프라인일 때만 저장본을 쓴다.
- * 파일을 추가·삭제하면 ASSETS를 수정하고 CACHE 버전을 올린다.
+ * 파일을 추가·삭제하면 ASSETS를 수정한다. CACHE 버전은 tools/build.js가 앱 파일 내용으로 자동으로 바꾼다.
+ * 브라우저 HTTP 캐시(GitHub Pages 10분)에 걸려 옛 파일이 보이지 않도록 매번 서버에 새 버전인지 확인한다(no-cache).
  * (사진 캐시 hl-photos는 photos.js가 관리하므로 여기서 지우지 않는다)
  */
 const CACHE_PREFIX = 'home-ledger-';
-const CACHE = `${CACHE_PREFIX}v14`;
+const CACHE = `${CACHE_PREFIX}5950b7e8`;
 const ASSETS = [
   './',
   './index.html',
@@ -51,7 +52,7 @@ self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(request)
+    fetch(request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(request, copy));

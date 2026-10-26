@@ -133,4 +133,21 @@ doSync(false).then(() => {
   if (sharedText) MODULES.find((m) => m.onShare)?.onShare(sharedText);
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+// 새 버전이 설치되면 알려주고, 앱으로 돌아올 때마다 새 버전이 있는지 확인한다
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('./sw.js').then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update(); });
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) showUpdateBar(); });
+}
+
+function showUpdateBar() {
+  if (document.querySelector('.update_bar')) return;
+  const bar = document.createElement('div');
+  bar.className = 'update_bar';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span>새 버전이 있어요</span><button type="button" class="update_bar_btn">새로고침</button>';
+  bar.querySelector('button').addEventListener('click', () => location.reload());
+  document.body.append(bar);
+}

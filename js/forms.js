@@ -8,8 +8,9 @@ import { esc, todayStr, parseAmount } from './utils.js';
  * 장부 종류별 추가 입력이 필요하면 extra(box, ctx)를 넘긴다.
  *   ctx: { data, setAmount, getCategory, onChange(fn) }
  *   반환: { read() } → 저장할 추가 필드 객체 (검증 실패 시 { error })
+ * afterSave(row): 저장이 끝난 뒤 실행 (예: 분류 규칙 저장·지난 내역 일괄 변경)
  */
-export function openEntryForm({ ledger, entry = null, defaults = {}, extra = null }) {
+export function openEntryForm({ ledger, entry = null, defaults = {}, extra = null, afterSave = null }) {
   const data = { flow: 'out', date: todayStr(), category: '', amount: '', memo: '', months: '', ...defaults, ...(entry || {}) };
 
   openSheet({
@@ -100,6 +101,7 @@ export function openEntryForm({ ledger, entry = null, defaults = {}, extra = nul
         if (await runTask(e.submitter, () => upsert('entries', row))) {
           close();
           toast('저장했어요');
+          afterSave?.(row);
         }
       });
 
