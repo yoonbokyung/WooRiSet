@@ -6,7 +6,7 @@
  * (사진 캐시 hl-photos는 photos.js가 관리하므로 여기서 지우지 않는다)
  */
 const CACHE_PREFIX = 'home-ledger-';
-const CACHE = `${CACHE_PREFIX}a4e1e666`;
+const CACHE = `${CACHE_PREFIX}9df2ee74`;
 const ASSETS = [
   './',
   './index.html',

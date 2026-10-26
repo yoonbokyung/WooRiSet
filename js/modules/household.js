@@ -750,6 +750,13 @@ function rentMatcher() {
   };
 }
 
+/** 출금취소는 취소된 출금과 같은 칸으로 넣어 서로 상쇄되게 한다 (저축 출금 취소 → 저축 해지 등). 일반 지출이면 환급·환불 그대로 */
+const CANCEL_OF = { saving: '저축 해지', transfer: '내 계좌 이동', asset: '목돈 입금' };
+function cancelCategory(tx, entries) {
+  const original = entries.find((e) => e.flow === 'out' && e.account === tx.account && Number(e.amount) === tx.amount && e.date === tx.date);
+  return original ? CANCEL_OF[tagOfEntry(original)] : '';
+}
+
 /** 문자 목록 [{ date(받은 시각 ms), body }] → 새로 넣을 가계부 내역과 통계 */
 function buildEntries(ledger, messages, { accounts, members } = {}) {
   const ctx = {
@@ -767,6 +774,7 @@ function buildEntries(ledger, messages, { accounts, members } = {}) {
     if (known.has(tx.ref) || known.has(refKey(tx.ref, tx.date))) { stats.dup += 1; return; }
     const c = classify(tx, ctx);
     if (!c) { stats.rent += 1; return; }
+    if (tx.kind === '출금취소') c.category = cancelCategory(tx, [...byLedger('entries', ledger.id), ...fresh]) || c.category;
     known.add(tx.ref).add(refKey(tx.ref, tx.date));
     fresh.push({ ledger_id: ledger.id, date: tx.date, flow: c.flow, category: c.category, amount: tx.amount, months: '', memo: tx.who || tx.kind, by: '', account: tx.account, ref: tx.ref });
     stats.byAccount.set(tx.account, (stats.byAccount.get(tx.account) || 0) + 1);

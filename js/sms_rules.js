@@ -197,6 +197,8 @@ export function classify(tx, { members = [], custom = [], isRent = () => false }
 
   const rules = incoming ? RULES_IN : RULES_OUT;
   const hit = rules.find(([re]) => re.test(who));
+  // 보험 해지·만기금처럼 큰 돈은 생활비 환급이 아니라 목돈으로 본다
+  if (hit && hit[1] === '환급·환불' && incoming && tx.amount >= BIG_TRANSFER) return { flow, category: '목돈 입금' };
   if (hit) return { flow, category: hit[1] };
 
   // 계좌번호로 정기 이체(기일출금·자동이체)되는 건 대부분 적금·청약
