@@ -29,10 +29,17 @@ const median = (list) => list.slice().sort((a, b) => a - b)[Math.floor(list.leng
 // 금액이 매달 달라 '고정'으로 보기 어려운 것은 뺀다
 const FIXED_SKIP = ['카드대금', '현금 인출'];
 const FIXED_MIN_HITS = 4; // 지난 6개월 중 이만큼 나가면 고정
+const STOPPED_MIN = 10000; // 멈춘 정기 출금은 이 금액 이상만 (자주 가던 카페·약국 제외)
 const FIXED_SPREAD = 0.3; // 달마다 금액이 중앙값에서 이 비율 넘게 흔들리면 고정이 아님 (페이 결제 등)
 
 /** 거래처 이름에서 회차·날짜 같은 숫자를 지워 같은 출금끼리 묶는다 (라이프PL115 → 라이프PL) */
 const payeeOf = (e) => String(e.memo || '').replace(/[\d\s,.\-_()]+/g, '').trim() || e.category;
+
+/** 금액이 중앙값 근처로 min번 이상 반복되면 정기 출금 */
+const isSteady = (amounts, min) => {
+  const mid = median(amounts);
+  return amounts.filter((v) => Math.abs(v - mid) <= mid * FIXED_SPREAD).length >= min;
+};
 
 function fixedCosts() {
   const now = thisMonth();
@@ -56,9 +63,7 @@ function fixedCosts() {
     list.forEach((e) => byMonth.set(e.date.slice(0, 7), (byMonth.get(e.date.slice(0, 7)) || 0) + Number(e.amount)));
     const hits = recent.filter((m) => byMonth.has(m));
     const first = list.reduce((min, e) => (e.date < min ? e.date : min), list[0].date);
-    const amounts = hits.map((m) => byMonth.get(m));
-    const mid = median(amounts);
-    const steady = amounts.filter((v) => Math.abs(v - mid) <= mid * FIXED_SPREAD).length >= FIXED_MIN_HITS;
+    const steady = isSteady(hits.map((m) => byMonth.get(m)), FIXED_MIN_HITS);
     // 화면에는 숫자를 지운 키 대신 가장 최근 거래처 이름을 그대로 보여준다
     const latest = list.reduce((a, e) => (e.date > a.date ? e : a), list[0]);
     if (hits.length >= FIXED_MIN_HITS && steady) {
@@ -73,7 +78,7 @@ function fixedCosts() {
         day: median(list.filter((e) => recent.includes(e.date.slice(0, 7))).map((e) => Number(e.date.slice(8)))),
         isNew: first >= `${recent[0]}-01`,
       });
-    } else if (latest.date < `${quiet[0]}-01` && before.filter((m) => byMonth.has(m)).length >= 3) {
+    } else if (latest.date < `${quiet[0]}-01` && isSteady(before.filter((m) => byMonth.has(m)).map((m) => byMonth.get(m)), 3) && byMonth.get(latest.date.slice(0, 7)) >= STOPPED_MIN) {
       stopped.push({ name: latest.memo || name, category, amount: byMonth.get(latest.date.slice(0, 7)), last: latest.date });
     }
   });
