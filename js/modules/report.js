@@ -29,6 +29,7 @@ const median = (list) => list.slice().sort((a, b) => a - b)[Math.floor(list.leng
 // 금액이 매달 달라 '고정'으로 보기 어려운 것은 뺀다
 const FIXED_SKIP = ['카드대금', '현금 인출'];
 const FIXED_MIN_HITS = 4; // 지난 6개월 중 이만큼 나가면 고정
+const FIXED_SPREAD = 0.3; // 달마다 금액이 중앙값에서 이 비율 넘게 흔들리면 고정이 아님 (페이 결제 등)
 
 /** 거래처 이름에서 회차·날짜 같은 숫자를 지워 같은 출금끼리 묶는다 (라이프PL115 → 라이프PL) */
 const payeeOf = (e) => String(e.memo || '').replace(/[\d\s,.\-_()]+/g, '').trim() || e.category;
@@ -55,10 +56,15 @@ function fixedCosts() {
     list.forEach((e) => byMonth.set(e.date.slice(0, 7), (byMonth.get(e.date.slice(0, 7)) || 0) + Number(e.amount)));
     const hits = recent.filter((m) => byMonth.has(m));
     const first = list.reduce((min, e) => (e.date < min ? e.date : min), list[0].date);
-    if (hits.length >= FIXED_MIN_HITS) {
+    const amounts = hits.map((m) => byMonth.get(m));
+    const mid = median(amounts);
+    const steady = amounts.filter((v) => Math.abs(v - mid) <= mid * FIXED_SPREAD).length >= FIXED_MIN_HITS;
+    // 화면에는 숫자를 지운 키 대신 가장 최근 거래처 이름을 그대로 보여준다
+    const latest = list.reduce((a, e) => (e.date > a.date ? e : a), list[0]);
+    if (hits.length >= FIXED_MIN_HITS && steady) {
       const amount = byMonth.get(hits[hits.length - 1]);
       items.push({
-        name,
+        name: latest.memo || name,
         category,
         saving: tagOfEntry(list[0]) === 'saving',
         amount,
@@ -68,8 +74,7 @@ function fixedCosts() {
         isNew: first >= `${recent[0]}-01`,
       });
     } else if (!quiet.some((m) => byMonth.has(m)) && before.filter((m) => byMonth.has(m)).length >= 3) {
-      const last = list.reduce((max, e) => (e.date > max ? e.date : max), list[0].date);
-      stopped.push({ name, category, amount: byMonth.get(last.slice(0, 7)), last });
+      stopped.push({ name: latest.memo || name, category, amount: byMonth.get(latest.date.slice(0, 7)), last: latest.date });
     }
   });
   const byAmount = (a, b) => b.amount - a.amount;
@@ -95,7 +100,7 @@ function fixedHtml() {
     <section class="card">
       <p class="hero_label">매달 고정으로 나가는 돈</p>
       <p class="hero_value">${won(sum(costs, (i) => i.amount))}</p>
-      <p class="hero_sub">고정 저축 ${won(sum(savings, (i) => i.amount))}은 따로 · 지난 6개월 중 ${FIXED_MIN_HITS}번 이상 나간 출금 기준 (카드대금·현금 인출 제외)</p>
+      <p class="hero_sub">고정 저축 ${won(sum(savings, (i) => i.amount))}은 따로 · 지난 6개월 중 ${FIXED_MIN_HITS}번 이상 비슷한 금액으로 나간 출금 기준 (카드대금·현금 인출 제외)</p>
     </section>
     ${costs.length ? `
       <section class="card">
