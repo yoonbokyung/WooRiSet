@@ -112,29 +112,48 @@ function summaryHtml(a) {
       <strong>입금 확인이 필요한 기간</strong>
       ${a.unpaid.map((r) => `<span>${periodLabel(r.month, r.contract)} · ${manwon(r.rent)}</span>`).join('')}
     </div>` : '';
+  const today = todayStr();
+  const year = today.slice(0, 4);
+  const yearRent = a.entries.filter((e) => isRent(e) && e.date.startsWith(year));
+  const c = a.current;
+  // 미납이 없으면 가장 궁금한 '다음 입금일·D-day'를 크게 보여준다
+  let head = `<p class="hero_label">월세 상태</p><p class="hero_value">계약 종료</p>`;
+  if (a.unpaid.length) {
+    head = `
+      <div class="rent_hero_head"><p class="hero_label">미납 ${a.unpaid.length}개월</p><span class="badge is_danger">확인 필요</span></div>
+      <p class="hero_value is_danger">${manwon(a.unpaidAmount)}</p>`;
+  } else if (a.next) {
+    const days = daysBetween(today, a.next.due);
+    head = `
+      <div class="rent_hero_head"><p class="hero_label">다음 입금 예정</p><span class="badge">미납 없음</span></div>
+      <p class="hero_value">${Number(a.next.due.slice(5, 7))}월 ${Number(a.next.due.slice(8))}일 <span class="rent_dday">${days ? `D-${days}` : '오늘'}</span></p>
+      <p class="hero_sub">${periodLabel(a.next.month, a.next.contract)}분 · ${manwon(a.next.rent)}</p>`;
+  }
   return `
     <section class="card">
-      <p class="hero_label">${a.unpaid.length ? `미납 ${a.unpaid.length}개월` : '월세 상태'}</p>
-      <p class="hero_value${a.unpaid.length ? ' is_danger' : ''}">${a.unpaid.length ? manwon(a.unpaidAmount) : '모두 입금 완료'}</p>
+      ${head}
       ${alert}
+      <p class="rent_terms">월세 ${manwon(c.rent)} · 보증금 ${manwon(c.deposit)} · 매월 ${c.due_day}일 ${c.pay_timing === 'pre' ? '선불' : '후불'}</p>
       <div class="stat_grid">
         <div class="stat_item">
-          <p class="stat_label">다음 입금 예정</p>
-          <p class="stat_value">${a.next ? fmtDate(a.next.due) : '-'}</p>
-          <p class="stat_sub">${a.next ? periodLabel(a.next.month, a.next.contract) : ''}</p>
-        </div>
-        <div class="stat_item">
-          <p class="stat_label">돌려줄 보증금</p>
-          <p class="stat_value">${manwon(a.current.deposit)}</p>
+          <p class="stat_label">올해 받은 월세</p>
+          <p class="stat_value">${manwon(sum(yearRent, (e) => e.amount))}</p>
+          <p class="stat_sub">${year}년 입금 ${yearRent.length}건</p>
         </div>
         <div class="stat_item">
           <p class="stat_label">누적 월세 수입</p>
           <p class="stat_value">${manwon(a.rentIncome)}</p>
+          <p class="stat_sub">${fmtDate(a.contracts[0].start_date).slice(0, 7)}부터</p>
         </div>
         <div class="stat_item">
           <p class="stat_label">누적 지출</p>
           <p class="stat_value">${manwon(a.expense)}</p>
           <p class="stat_sub">수리비·수수료 등</p>
+        </div>
+        <div class="stat_item">
+          <p class="stat_label">순수익</p>
+          <p class="stat_value">${manwon(a.rentIncome - a.expense)}</p>
+          <p class="stat_sub">월세 수입 - 지출</p>
         </div>
       </div>
     </section>`;
@@ -145,14 +164,33 @@ function gridHtml(a) {
   const firstYear = Number(a.rows[0].month.slice(0, 4));
   const lastYear = Number(a.rows[a.rows.length - 1].month.slice(0, 4));
   const label = { paid: '입금', unpaid: '미납', upcoming: '예정' };
+  const startMonth = Number(a.rows[0].month.slice(5));
   const years = [];
+  // 연도마다 한 줄: 12칸 진행 막대 + 입금 개월·금액. 누르면 달별 칸이 펼쳐진다 (미납 있는 해는 펼친 채로)
   for (let y = lastYear; y >= firstYear; y--) {
+    const rows = a.rows.filter((r) => r.month.startsWith(`${y}-`));
+    const paidRows = rows.filter((r) => r.status === 'paid');
+    const unpaid = rows.filter((r) => r.status === 'unpaid').length;
+    const months = y === firstYear ? 13 - startMonth : 12;
+    const segs = Array.from({ length: 12 }, (_, i) => {
+      const r = byMonth.get(`${y}-${pad(i + 1)}`);
+      return `<span class="rent_seg${r ? ` is_${r.status}` : ''}"></span>`;
+    }).join('');
     const cells = Array.from({ length: 12 }, (_, i) => {
       const r = byMonth.get(`${y}-${pad(i + 1)}`);
       if (!r) return '<span class="rent_month is_none"></span>';
       return `<button type="button" class="rent_month is_${r.status}" data-month="${r.month}" aria-label="${y}년 ${i + 1}월분 ${label[r.status]}">${i + 1}</button>`;
     }).join('');
-    years.push(`<div class="rent_year"><p class="rent_year_label">${y}</p><div class="rent_months">${cells}</div></div>`);
+    years.push(`
+      <details class="rent_year"${unpaid ? ' open' : ''}>
+        <summary class="rent_year_head">
+          <span class="rent_year_label">${y}년</span>
+          <span class="rent_segs" aria-hidden="true">${segs}</span>
+          <span class="rent_year_count">${paidRows.length}/${months}개월</span>
+          <span class="rent_year_sum${unpaid ? ' is_danger' : ''}">${manwon(sum(paidRows, (r) => r.rent))} · ${unpaid ? `미납 ${unpaid}개월` : '미납 없음'}</span>
+        </summary>
+        <div class="rent_months">${cells}</div>
+      </details>`);
   }
   const day = Number(a.current.due_day) || 15;
   return `
@@ -163,8 +201,8 @@ function gridHtml(a) {
         <li class="rent_legend_item is_unpaid">미납</li>
         <li class="rent_legend_item is_upcoming">예정</li>
       </ul>
-      ${years.join('')}
-      <p class="field_hint rent_grid_hint">각 칸은 해당 월 ${day}일부터 한 달 기간이에요. 칸을 누르면 입금 내역을 보거나 입력할 수 있어요.</p>
+      <div class="rent_years">${years.join('')}</div>
+      <p class="field_hint rent_grid_hint">연도를 누르면 달별 칸이 펼쳐져요. 각 칸은 해당 월 ${day}일부터 한 달이고, 누르면 입금 내역을 보거나 입력할 수 있어요.</p>
     </section>`;
 }
 
@@ -188,17 +226,25 @@ function contractHtml(a) {
     </section>`;
 }
 
-function entryItem(e, a) {
-  const months = splitMonths(e.months);
-  let period = '';
-  if (isRent(e) && months.length === 1) period = periodLabel(months[0], contractFor(months[0], a.contracts));
-  else if (isRent(e) && months.length > 1) period = `${months.length}개월분`;
-  const sub = [fmtDate(e.date), period, e.memo, e.by].filter(Boolean).join(' · ');
+/** 월세 대상 기간 → '2026년 9월분', '2026년 7~9월분', '25.12~26.02월분' */
+function monthsTitle(months) {
+  const [first, last] = [months[0], months[months.length - 1]];
+  const m = (v) => Number(v.slice(5));
+  if (months.length === 1) return `${first.slice(0, 4)}년 ${m(first)}월분`;
+  if (first.slice(0, 4) === last.slice(0, 4)) return `${first.slice(0, 4)}년 ${m(first)}~${m(last)}월분`;
+  return `${first.slice(2, 4)}.${first.slice(5)}~${last.slice(2, 4)}.${last.slice(5)}월분`;
+}
+
+function entryItem(e) {
+  const months = splitMonths(e.months).sort();
+  const rent = isRent(e) && months.length;
+  // 월세는 제목에 '몇 월분'을, 아래 줄에 실제 입금일을 둔다
+  const sub = [`${fmtDate(e.date)} ${e.flow === 'in' ? '입금' : '지출'}`, rent && months.length > 1 ? `${months.length}개월분` : '', e.memo, e.by].filter(Boolean).join(' · ');
   return `
     <li class="list_row">
       <button type="button" class="list_item" data-entry="${esc(e.id)}">
         <span class="list_item_body">
-          <span class="list_item_title">${esc(e.category)}</span>
+          <span class="list_item_title">${esc(rent ? monthsTitle(months) : e.category)}</span>
           <span class="list_item_sub">${esc(sub)}</span>
         </span>
         <span class="list_item_amount ${e.flow === 'in' ? 'amount_in' : 'amount_out'}">${e.flow === 'in' ? '+' : '-'}${manwon(e.amount)}</span>
@@ -218,7 +264,7 @@ function entriesHtml(ledger, a) {
       <div class="chip_row rent_filter">
         ${FILTERS.map(([k, label]) => `<button type="button" class="chip${filter === k ? ' is_active' : ''}" data-filter="${k}" aria-pressed="${filter === k}">${label}</button>`).join('')}
       </div>
-      ${list.length ? `<ul>${list.slice(0, limit).map((e) => entryItem(e, a)).join('')}</ul>` : '<p class="empty">내역이 없어요</p>'}
+      ${list.length ? `<ul>${list.slice(0, limit).map(entryItem).join('')}</ul>` : '<p class="empty">내역이 없어요</p>'}
       ${list.length > limit ? `<button type="button" class="btn btn_sub rent_more" data-action="more">더보기 (${list.length - limit}건)</button>` : ''}
     </section>`;
 }

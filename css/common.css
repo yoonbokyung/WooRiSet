@@ -54,6 +54,11 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 .secret{transition:filter 0.2s;filter:blur(6px);cursor:pointer;user-select:none;}
 .is_secret_shown .secret{filter:none;cursor:inherit;user-select:auto;}
 
+/* account tag */
+.account_tag{display:inline-block;margin-right:5px;padding:0 5px;border-radius:5px;font-size:var(--text-tiny);font-weight:700;line-height:20px;color:var(--color-text-primary);vertical-align:1px;}
+.account_tag.is_acc1{background:var(--color-acc1-soft);}
+.account_tag.is_acc2{background:var(--color-acc2-soft);}
+
 /* badge */
 .badge{display:inline-flex;height:25px;padding:0 10px;border-radius:15px;background:var(--color-good-soft);font-size:var(--text-caption);font-weight:700;color:var(--color-good);white-space:nowrap;align-items:center;flex-shrink:0;}
 .badge.is_danger{background:var(--color-danger-soft);color:var(--color-danger);}
@@ -168,6 +173,7 @@ img[data-photo]:not([src]),img.is_missing{visibility:hidden;}
   .stat_item:nth-child(n+3){margin-top:3.8462vw;}
   .stat_value{margin-top:1.2821vw;}
   .is_link .stat_label::after,.hero_link .hero_label::after{margin-left:1.2821vw;}
+  .account_tag{margin-right:1.2821vw;padding:0 1.2821vw;line-height:5.1282vw;}
   .badge{height:6.4103vw;padding:0 2.5641vw;}
   .alert{margin-top:3.8462vw;padding:3.8462vw;gap:1.2821vw;}
   .list_item{padding:3.8462vw 0;gap:3.8462vw;}

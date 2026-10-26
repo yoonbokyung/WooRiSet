@@ -1,10 +1,10 @@
 /* color */
-:root{--color-bg:#f3f6fa;--color-surface:#ffffff;--color-surface-sub:#f4f7fb;--color-border:#e3e8ef;--color-text-primary:#1b2330;--color-text-secondary:#4a5566;--color-text-muted:#7b8598;--color-text-white:#ffffff;--color-primary:#2563eb;--color-primary-soft:#e8f0fe;--color-on-primary:#ffffff;--color-income:#2563eb;--color-expense:#e5323f;--color-good:#0b8a5f;--color-good-soft:#e1f5ec;--color-danger:#e5323f;--color-danger-soft:#fdecee;--color-overlay:rgba(27,35,48,0.45);--color-shadow:rgba(27,35,48,0.08);}
+:root{--color-bg:#f3f6fa;--color-surface:#ffffff;--color-surface-sub:#f4f7fb;--color-border:#e3e8ef;--color-text-primary:#1b2330;--color-text-secondary:#4a5566;--color-text-muted:#7b8598;--color-text-white:#ffffff;--color-primary:#2563eb;--color-primary-soft:#e8f0fe;--color-on-primary:#ffffff;--color-income:#2563eb;--color-expense:#e5323f;--color-good:#0b8a5f;--color-good-soft:#e1f5ec;--color-danger:#e5323f;--color-danger-soft:#fdecee;--color-acc1:#0891b2;--color-acc1-soft:#e0f4f7;--color-acc2:#7c3aed;--color-acc2-soft:#f1ebfe;--color-overlay:rgba(27,35,48,0.45);--color-shadow:rgba(27,35,48,0.08);}
 
 /* font */
 :root{--font-base:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;--text-hero:28px;--text-title:20px;--text-heading:17px;--text-input:16px;--text-body:15px;--text-small:13px;--text-caption:12px;--text-tiny:11px;}
 
 /* dark mode */
 @media (prefers-color-scheme:dark){
-  :root{--color-bg:#0f1218;--color-surface:#1a1f27;--color-surface-sub:#232a34;--color-border:#2f3744;--color-text-primary:#eef2f7;--color-text-secondary:#b6c0cd;--color-text-muted:#7d8796;--color-primary:#6ea8ff;--color-primary-soft:#1a2a44;--color-on-primary:#0f1a2e;--color-income:#6ea8ff;--color-expense:#ff6b76;--color-good:#3ccf91;--color-good-soft:#173528;--color-danger:#ff5c68;--color-danger-soft:#3a1d21;--color-overlay:rgba(0,0,0,0.6);--color-shadow:rgba(0,0,0,0.3);}
+  :root{--color-bg:#0f1218;--color-surface:#1a1f27;--color-surface-sub:#232a34;--color-border:#2f3744;--color-text-primary:#eef2f7;--color-text-secondary:#b6c0cd;--color-text-muted:#7d8796;--color-primary:#6ea8ff;--color-primary-soft:#1a2a44;--color-on-primary:#0f1a2e;--color-income:#6ea8ff;--color-expense:#ff6b76;--color-good:#3ccf91;--color-good-soft:#173528;--color-danger:#ff5c68;--color-danger-soft:#3a1d21;--color-acc1:#18a6b9;--color-acc1-soft:#15333a;--color-acc2:#9873ea;--color-acc2-soft:#2a2142;--color-overlay:rgba(0,0,0,0.6);--color-shadow:rgba(0,0,0,0.3);}
 }

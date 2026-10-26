@@ -5,7 +5,7 @@
  * (사진 캐시 hl-photos는 photos.js가 관리하므로 여기서 지우지 않는다)
  */
 const CACHE_PREFIX = 'home-ledger-';
-const CACHE = `${CACHE_PREFIX}v13`;
+const CACHE = `${CACHE_PREFIX}v14`;
 const ASSETS = [
   './',
   './index.html',
@@ -25,6 +25,7 @@ const ASSETS = [
   './js/modules/index.js',
   './js/modules/rent.js',
   './js/modules/household.js',
+  './js/modules/report.js',
   './js/photos.js',
   './js/sms_rules.js',
   './js/coupang.js',

@@ -18,7 +18,8 @@
  */
 import household from './household.js';
 import rent from './rent.js';
+import report from './report.js';
 // 여행(travel.js)은 기능을 다시 기획할 때까지 빼둔다. 다시 넣을 때 index.html에 Leaflet CDN도 되살린다
-export const MODULES = [household, rent];
+export const MODULES = [household, rent, report];
 
 export const getModule = (kind) => MODULES.find((m) => m.kind === kind);

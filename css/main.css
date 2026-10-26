@@ -46,20 +46,39 @@
 /* ledger switch */
 .ledger_switch .chip{display:inline-flex;align-items:center;}
 
+/* rent summary */
+.rent_hero_head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.rent_dday{margin-left:5px;font-size:var(--text-title);color:var(--color-primary);vertical-align:middle;}
+.rent_terms{margin-top:15px;padding:10px 15px;border-radius:12px;background:var(--color-surface-sub);font-size:var(--text-small);font-weight:600;color:var(--color-text-secondary);}
+
 /* rent grid */
 .rent_legend{display:flex;margin-bottom:15px;font-size:var(--text-caption);color:var(--color-text-muted);gap:15px;}
 .rent_legend_item{display:flex;align-items:center;gap:5px;}
 .rent_legend_item::before{content:'';display:block;width:10px;height:10px;border-radius:3px;background:var(--color-surface-sub);}
 .rent_legend_item.is_paid::before{background:var(--color-good);}
 .rent_legend_item.is_unpaid::before{background:var(--color-danger);}
-.rent_legend_item.is_upcoming::before{border:1px dashed var(--color-text-muted);background:transparent;}
-.rent_year+.rent_year{margin-top:15px;}
-.rent_year_label{margin-bottom:5px;font-size:var(--text-caption);font-weight:700;color:var(--color-text-secondary);}
+.rent_legend_item.is_upcoming::before{background:var(--color-border);}
+.rent_years{border-top:1px solid var(--color-border);}
+.rent_year{border-bottom:1px solid var(--color-border);}
+.rent_year_head{display:grid;padding:15px 0;list-style:none;cursor:pointer;grid-template-columns:auto 1fr auto 10px;align-items:center;column-gap:10px;row-gap:5px;}
+.rent_year_head::-webkit-details-marker{display:none;}
+.rent_year_head::after{content:'›';font-size:var(--text-body);color:var(--color-text-muted);transition:transform 0.2s;grid-column:4;grid-row:1;}
+.rent_year[open] .rent_year_head::after{transform:rotate(90deg);}
+.rent_year_label{font-size:var(--text-body);font-weight:800;white-space:nowrap;}
+.rent_segs{display:grid;overflow:hidden;border-radius:5px;grid-template-columns:repeat(12,1fr);gap:1px;}
+.rent_seg{height:10px;background:var(--color-surface-sub);}
+.rent_seg.is_paid{background:var(--color-good);}
+.rent_seg.is_unpaid{background:var(--color-danger);}
+.rent_seg.is_upcoming{background:var(--color-border);}
+.rent_year_count{font-size:var(--text-caption);font-weight:700;color:var(--color-text-secondary);}
+.rent_year_sum{font-size:var(--text-caption);color:var(--color-text-muted);grid-column:2/-1;}
+.rent_year_sum.is_danger{font-weight:700;color:var(--color-danger);}
+.rent_year .rent_months{padding-bottom:15px;}
 .rent_months{display:grid;grid-template-columns:repeat(12,1fr);gap:5px;}
 .rent_month{display:flex;height:30px;border-radius:6px;background:var(--color-surface-sub);font-size:var(--text-tiny);font-weight:600;color:var(--color-text-muted);align-items:center;justify-content:center;}
 .rent_month.is_paid{background:var(--color-good-soft);color:var(--color-good);}
 .rent_month.is_unpaid{background:var(--color-danger);color:var(--color-text-white);}
-.rent_month.is_upcoming{border:1px dashed var(--color-text-muted);background:transparent;}
+.rent_month.is_upcoming{background:var(--color-border);color:var(--color-text-secondary);}
 .rent_month.is_none{visibility:hidden;}
 .rent_grid_hint{margin-top:15px;}
 .rent_filter{margin-bottom:5px;}
@@ -94,6 +113,9 @@
 
 /* drill & sms import */
 .drill_total{margin-bottom:10px;font-size:var(--text-small);font-weight:700;color:var(--color-text-secondary);}
+.moved_note{display:flex;width:100%;margin-top:15px;padding:10px 15px;border-radius:12px;background:var(--color-surface-sub);font-size:var(--text-small);color:var(--color-text-secondary);text-align:left;align-items:center;justify-content:space-between;gap:10px;}
+.moved_note strong{font-weight:700;color:var(--color-text-primary);}
+.moved_note svg{width:15px;height:15px;color:var(--color-text-muted);flex-shrink:0;}
 .drill_note{margin:10px 0;font-size:var(--text-caption);color:var(--color-text-muted);}
 
 /* coupang orders */
@@ -110,6 +132,36 @@
 .copy_value{display:block;overflow:hidden;padding:5px 10px;border-radius:8px;background:var(--color-surface);font-size:var(--text-caption);color:var(--color-primary);white-space:nowrap;text-overflow:ellipsis;cursor:pointer;}
 .import_preview{display:flex;margin-bottom:15px;font-size:var(--text-small);flex-direction:column;gap:5px;}
 .import_preview span{color:var(--color-text-muted);}
+
+/* report */
+.report_tabs{flex-wrap:nowrap;}
+.report_row{display:flex;padding:15px 0;border-top:1px solid var(--color-border);align-items:center;gap:10px;}
+.report_row:first-child{padding-top:0;border-top:0;}
+.report_row_body{display:flex;min-width:0;flex:1;flex-direction:column;gap:5px;}
+.report_row_name{display:flex;overflow:hidden;font-size:var(--text-body);font-weight:700;white-space:nowrap;text-overflow:ellipsis;align-items:center;gap:5px;}
+.report_row_sub{font-size:var(--text-caption);color:var(--color-text-muted);}
+.report_row_value{display:flex;font-size:var(--text-body);text-align:right;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;}
+.report_change{font-size:var(--text-caption);font-weight:600;color:var(--color-text-muted);}
+.report_change.is_up{color:var(--color-expense);}
+.report_change.is_down{color:var(--color-good);}
+.report_range{margin-bottom:10px;}
+.report_note{margin-top:15px;}
+.balance_chart{position:relative;}
+.balance_svg{display:block;overflow:visible;width:100%;height:auto;touch-action:pan-y;}
+.balance_grid{stroke:var(--color-border);stroke-width:1;}
+.balance_axis{font-size:11px;fill:var(--color-text-muted);}
+.balance_line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
+.balance_line.is_acc1,.balance_dot.is_acc1{stroke:var(--color-acc1);}
+.balance_line.is_acc2,.balance_dot.is_acc2{stroke:var(--color-acc2);}
+.balance_dot{stroke-width:2;fill:var(--color-surface);}
+.balance_cross{stroke:var(--color-text-muted);stroke-width:1;stroke-dasharray:3 3;}
+.balance_tip{display:flex;position:absolute;top:0;left:0;padding:10px;border-radius:10px;background:var(--color-surface);font-size:var(--text-caption);color:var(--color-text-primary);white-space:nowrap;box-shadow:0 2px 10px var(--color-shadow);pointer-events:none;flex-direction:column;gap:5px;}
+.balance_tip[hidden]{display:none;}
+.balance_tip_row::before,.balance_legend_item::before{content:'';display:inline-block;width:10px;height:10px;margin-right:5px;border-radius:50%;vertical-align:-1px;}
+.balance_tip_row.is_acc1::before,.balance_legend_item.is_acc1::before{background:var(--color-acc1);}
+.balance_tip_row.is_acc2::before,.balance_legend_item.is_acc2::before{background:var(--color-acc2);}
+.balance_legend{display:flex;margin:10px 0 5px;font-size:var(--text-small);color:var(--color-text-secondary);flex-wrap:wrap;gap:15px;}
+.balance_legend_item strong{color:var(--color-text-primary);}
 
 /* settings */
 .note_list{margin-bottom:15px;}
@@ -188,11 +240,15 @@
   .recent_date{width:10.2564vw;}
   .widget_trip{gap:3.8462vw;}
   .widget_trip_cover{width:20.5128vw;height:20.5128vw;}
+  .rent_hero_head{gap:2.5641vw;}
+  .rent_dday{margin-left:1.2821vw;}
+  .rent_terms{margin-top:3.8462vw;padding:2.5641vw 3.8462vw;}
   .rent_legend{margin-bottom:3.8462vw;gap:3.8462vw;}
   .rent_legend_item{gap:1.2821vw;}
   .rent_legend_item::before{width:2.5641vw;height:2.5641vw;}
-  .rent_year+.rent_year{margin-top:3.8462vw;}
-  .rent_year_label{margin-bottom:1.2821vw;}
+  .rent_year_head{padding:3.8462vw 0;column-gap:2.5641vw;row-gap:1.2821vw;}
+  .rent_seg{height:2.5641vw;}
+  .rent_year .rent_months{padding-bottom:3.8462vw;}
   .rent_months{gap:1.2821vw;}
   .rent_month{height:7.6923vw;}
   .rent_grid_hint{margin-top:3.8462vw;}
@@ -209,6 +265,8 @@
   .period_note{padding:2.5641vw 3.8462vw;gap:2.5641vw;}
   .widget .period_note{margin-bottom:1.2821vw;}
   .drill_total{margin-bottom:2.5641vw;}
+  .moved_note{margin-top:3.8462vw;padding:2.5641vw 3.8462vw;gap:2.5641vw;}
+  .moved_note svg{width:3.8462vw;height:3.8462vw;}
   .drill_note{margin:2.5641vw 0;}
   .coupang_item{padding:2.5641vw 0;gap:2.5641vw;}
   .import_details{margin-top:5.1282vw;padding:3.8462vw;}
@@ -218,6 +276,16 @@
   .guide_values{margin-bottom:2.5641vw;}
   .copy_value{padding:1.2821vw 2.5641vw;}
   .import_preview{margin-bottom:3.8462vw;gap:1.2821vw;}
+  .report_row{padding:3.8462vw 0;gap:2.5641vw;}
+  .report_row_body{gap:1.2821vw;}
+  .report_row_name{gap:1.2821vw;}
+  .report_row_value{gap:1.2821vw;}
+  .report_range{margin-bottom:2.5641vw;}
+  .report_note{margin-top:3.8462vw;}
+  .balance_axis{font-size:2.8205vw;}
+  .balance_tip{padding:2.5641vw;gap:1.2821vw;}
+  .balance_tip_row::before,.balance_legend_item::before{width:2.5641vw;height:2.5641vw;margin-right:1.2821vw;}
+  .balance_legend{margin:2.5641vw 0 1.2821vw;gap:3.8462vw;}
   .note_list{margin-bottom:3.8462vw;}
   .note_row{padding:2.5641vw 0;gap:2.5641vw;}
   .travel_intro_icon{width:15.3846vw;height:15.3846vw;margin:0 auto 3.8462vw;}

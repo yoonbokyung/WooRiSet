@@ -188,7 +188,7 @@ function widget(ledgers) {
           ${recent.map((e) => `
             <li class="recent_row">
               <span class="recent_date">${fmtDate(e.date).slice(5)}</span>
-              <span class="recent_body"><span class="recent_title">${esc(e.memo || e.category)}</span><span class="recent_sub">${esc([e.category, e.account].filter(Boolean).join(' · '))}</span></span>
+              <span class="recent_body"><span class="recent_title">${esc(e.memo || e.category)}</span><span class="recent_sub">${accountTag(e.account)}${esc(e.category)}</span></span>
               <span class="recent_amount ${e.flow === 'in' ? 'amount_in' : 'amount_out'}">${e.flow === 'in' ? '+' : '-'}${won(e.amount)}</span>
             </li>`).join('')}
         </ul>
@@ -207,16 +207,24 @@ function widget(ledgers) {
 
 /* ---------- 상세 화면 ---------- */
 
+/** 통장 이름 라벨 — 문자 가져오기에 설정한 계좌 순서대로 색을 나눈다 */
+function accountTag(name) {
+  if (!name) return '';
+  const index = Math.max(parseJson(setting('bank_accounts'), []).findIndex((a) => a.name === name), 0);
+  return `<span class="account_tag is_acc${(index % 2) + 1}">${esc(name)}</span>`;
+}
+
 function entryItem(e) {
   const isRent = e.ledger_id && state.ledgers.find((l) => l.id === e.ledger_id)?.kind === 'rent';
-  const sub = [isRent ? '월세 메뉴' : e.account, e.memo, e.by].filter(Boolean).join(' · ');
+  const sub = [isRent ? '월세 메뉴' : '', e.memo, e.by].filter(Boolean).join(' · ');
+  const account = isRent ? '' : accountTag(e.account);
   const tag = isRent ? '' : tagOfEntry(e);
   return `
     <li class="list_row">
       <button type="button" class="list_item${['transfer', 'asset'].includes(tag) ? ' is_excluded' : ''}" data-entry="${esc(e.id)}">
         <span class="list_item_body">
           <span class="list_item_title">${esc(e.category)}</span>
-          ${sub ? `<span class="list_item_sub">${esc(sub)}</span>` : ''}
+          ${sub || account ? `<span class="list_item_sub">${account}${esc(sub)}</span>` : ''}
         </span>
         <span class="list_item_amount ${e.flow === 'in' ? 'amount_in' : 'amount_out'}">${e.flow === 'in' ? '+' : '-'}${won(e.amount)}</span>
       </button>
@@ -238,22 +246,6 @@ function groupedList(list, empty) {
       </li>`;
   }).join('');
   return groups ? `<ul>${groups}</ul>` : `<p class="empty">${empty}</p>`;
-}
-
-function trendHtml(ledgerId, month, account) {
-  const rows = Array.from({ length: TREND_MONTHS }, (_, i) => addMonths(month, i - TREND_MONTHS + 1))
-    .map((m) => [
-      `${Number(m.slice(5))}월${notesFor(m).length ? ` · ${notesFor(m).map((n) => n.label).join(', ')}` : ''}`,
-      summarize(ledgerId, m, account).expense,
-      `data-jump="${m}" aria-label="${fmtMonth(m)}로 이동"`,
-    ]);
-  const max = Math.max(...rows.map((r) => r[1]));
-  if (!max) return '';
-  return `
-    <section class="card">
-      <h2 class="card_title">최근 ${TREND_MONTHS}개월 지출 <span class="field_hint">누르면 그 달로 이동</span></h2>
-      <ul class="cat_bars">${bars(rows, max)}</ul>
-    </section>`;
 }
 
 /** 요약 숫자를 누르면 해당 내역만 모아 보여준다 */
@@ -348,8 +340,9 @@ function view(ledger) {
           ${statButton('income', '수입', won(s.income), `<span class="secret">급여 ${won(s.salary)}${s.rent ? ` · 월세 ${won(s.rent)}` : ''}</span>`, ' amount_in secret')}
           ${statButton('saving', '저축·투자', signed(s.saving))}
           <div class="stat_item"><p class="stat_label">남은 돈</p><p class="stat_value">${signed(left)}</p><p class="stat_sub">수입 - 지출 - 저축</p></div>
-          ${statButton('moved', '계좌 이동·목돈', won(s.movedTotal), '합계에서 제외')}
+          <div class="stat_item"><p class="stat_label">저축률</p><p class="stat_value">${month < thisMonth() ? `${rateOf(s)}%` : '-'}</p><p class="stat_sub">${month < thisMonth() ? '저축 ÷ 수입' : '달이 끝나면 계산해요'}</p></div>
         </div>
+        ${s.movedTotal ? `<button type="button" class="moved_note" data-drill="moved"><span>계좌 이동·목돈 <strong>${won(s.movedTotal)}</strong>은 합계에서 뺐어요</span>${ICONS.next}</button>` : ''}
       </section>
       ${s.cats.length ? `
         <section class="card">
@@ -357,7 +350,6 @@ function view(ledger) {
           ${s.coupang?.moved ? `<p class="card_desc">쿠팡 주문 ${won(Math.round(s.coupang.moved))}을 카드대금·생활비 이체에서 실제 카테고리로 나눴어요</p>` : ''}
           <ul class="cat_bars">${bars(s.cats.map(([name, value]) => [name, value, `data-drill="cat:${esc(name)}"`]), s.cats[0][1], s.spent)}</ul>
         </section>` : ''}
-      ${trendHtml(ledger.id, month, account)}
       <section class="card">
         <h2 class="card_title">내역 <span class="field_hint">${s.list.length}건</span></h2>
         ${groupedList(s.list, '이 달의 내역이 없어요<br>오른쪽 아래 + 버튼으로 추가해보세요')}
