@@ -50,6 +50,10 @@ body{background:var(--color-bg);font-family:var(--font-base);font-size:var(--tex
 .amount_in{color:var(--color-income);}
 .amount_out{color:var(--color-expense);}
 
+/* secret amount */
+.secret{transition:filter 0.2s;filter:blur(6px);cursor:pointer;user-select:none;}
+.is_secret_shown .secret{filter:none;cursor:inherit;user-select:auto;}
+
 /* badge */
 .badge{display:inline-flex;height:25px;padding:0 10px;border-radius:15px;background:var(--color-good-soft);font-size:var(--text-caption);font-weight:700;color:var(--color-good);white-space:nowrap;align-items:center;flex-shrink:0;}
 .badge.is_danger{background:var(--color-danger-soft);color:var(--color-danger);}

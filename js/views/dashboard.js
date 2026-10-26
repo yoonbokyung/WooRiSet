@@ -30,7 +30,7 @@ export function dashboardView() {
       html: `${hello}
         <section class="card">
           <h2 class="card_title">구글 시트 연결이 필요해요</h2>
-          <p class="card_desc">연결하면 가계부·월세·여행 기록을 불러올 수 있어요.</p>
+          <p class="card_desc">연결하면 가계부·월세 기록을 불러올 수 있어요.</p>
           <a class="btn" href="#/settings">연결 설정하기</a>
         </section>`,
     };

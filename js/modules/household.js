@@ -2,7 +2,8 @@ import { state, byLedger, refresh, tagOf, setting, saveSetting, insertMany, remo
 import { getConfig } from '../config.js';
 import { openEntryForm } from '../forms.js';
 import { openSheet, runTask, toast } from '../ui.js';
-import { extractSms, splitSmsText, parseKbSms, classify, applyPayrollDeductions, KB_SENDER } from '../sms_rules.js';
+import { extractSms, splitSmsText, parseKbSms, classify, applyPayrollDeductions, refKey, KB_SENDER } from '../sms_rules.js';
+import { buildCoupangRecords, COUPANG_TYPE } from '../coupang.js';
 import { ICONS } from '../icons.js';
 import { esc, pad, todayStr, thisMonth, addMonths, fmtMonth, fmtDay, fmtDate, won, sum, byDateDesc, parseJson } from '../utils.js';
 
@@ -12,6 +13,8 @@ const TREND_MONTHS = 6;
 const IMPORT_CHUNK = 500;
 const viewMonth = new Map(); // 장부별로 보고 있는 월
 const viewAccount = new Map(); // 장부별 계좌 필터
+const viewMode = new Map(); // 장부별 보기 방식 (month | year)
+const viewYear = new Map(); // 장부별로 보고 있는 해
 
 const monthOf = (ledgerId) => viewMonth.get(ledgerId) || thisMonth();
 
@@ -30,6 +33,41 @@ function rentEntriesOf(month) {
   return state.entries.filter((e) => rentLedgers.has(e.ledger_id) && e.flow === 'in' && e.date.startsWith(month) && tagOf('rent', e.category) === 'rent');
 }
 
+/** 쿠팡 결제가 들어 있는 덩어리 내역: 생활비 이체 + 설정한 카드(coupang_card)의 카드대금 */
+function isCoupangPool(e) {
+  if (e.flow !== 'out') return false;
+  if (e.category === '생활비 이체') return true;
+  const card = setting('coupang_card');
+  return e.category === '카드대금' && (!card || String(e.memo).includes(card));
+}
+
+/**
+ * 쿠팡 주문을 같은 달(주문일 기준) 덩어리에서 떼어 실제 카테고리로 옮긴다.
+ * 옮기는 금액은 그 달 덩어리 합계를 넘지 않으므로 생활 지출 총액은 그대로다.
+ */
+function coupangShift(ledgerId, months) {
+  const delta = new Map();
+  const items = [];
+  let moved = 0;
+  const add = (category, value) => delta.set(category, (delta.get(category) || 0) + value);
+  const orders = byLedger('records', ledgerId).filter((r) => r.type === COUPANG_TYPE);
+  if (!orders.length) return { delta, items, moved };
+  months.forEach((m) => {
+    const list = orders.filter((r) => r.date.startsWith(m)).map((r) => ({ ...r, ...parseJson(r.data, {}) }));
+    if (!list.length) return;
+    const pool = byLedger('entries', ledgerId).filter((e) => e.date.startsWith(m) && isCoupangPool(e));
+    const poolTotal = sum(pool, (e) => e.amount);
+    const total = sum(list, (o) => o.amount);
+    const take = Math.min(total, poolTotal);
+    if (!take) return;
+    list.forEach((o) => add(o.category, (o.amount * take) / total));
+    pool.forEach((e) => add(e.category, (-e.amount * take) / poolTotal));
+    items.push(...list);
+    moved += take;
+  });
+  return { delta, items, moved };
+}
+
 function summarize(ledgerId, month, account = '') {
   const list = byLedger('entries', ledgerId)
     .filter((e) => e.date.startsWith(month) && (!account || e.account === account))
@@ -43,6 +81,9 @@ function summarize(ledgerId, month, account = '') {
   const rents = account ? [] : rentEntriesOf(month); // 계좌별로 볼 때는 월세 제외
   const cats = new Map();
   outs.forEach((e) => cats.set(e.category, (cats.get(e.category) || 0) + Number(e.amount)));
+  // 계좌별로 볼 때는 덩어리가 그 계좌에 없을 수 있어 쿠팡 나누기를 하지 않는다
+  const coupang = account ? null : coupangShift(ledgerId, month.length === 4 ? Array.from({ length: 12 }, (_, i) => `${month}-${pad(i + 1)}`) : [month]);
+  coupang?.delta.forEach((value, category) => cats.set(category, (cats.get(category) || 0) + value));
   const spent = sum(outs, (e) => e.amount);
   const refund = sum(refunds, (e) => (e.flow === 'in' ? e.amount : -e.amount));
   return {
@@ -59,7 +100,8 @@ function summarize(ledgerId, month, account = '') {
     refund,
     saving: sum(savings, (e) => (e.flow === 'out' ? e.amount : -e.amount)),
     movedTotal: sum(moved, (e) => e.amount),
-    cats: [...cats].sort((a, b) => b[1] - a[1]),
+    cats: [...cats].map(([name, value]) => [name, Math.round(value)]).filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]),
+    coupang,
   };
 }
 
@@ -132,7 +174,7 @@ function widget(ledgers) {
       <p class="widget_value">${won(s.expense)}</p>
       ${compareText(s, prev) ? `<p class="widget_sub">${compareText(s, prev)}</p>` : ''}
       <div class="widget_stats">
-        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in">${won(s.income)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in secret">${won(s.income)}</span></div>
         <div class="widget_stat"><span class="widget_stat_label">저축</span><span class="widget_stat_value">${signedWon(s.saving)}</span></div>
         <div class="widget_stat"><span class="widget_stat_label">남은 돈</span><span class="widget_stat_value">${signedWon(left)}</span></div>
       </div>
@@ -154,7 +196,7 @@ function widget(ledgers) {
     <a class="widget" href="${link}">
       <div class="widget_head"><span class="widget_icon">${ICONS.home}</span><strong class="widget_title">${year}년 한눈에</strong>${ICONS.next}</div>
       <div class="widget_stats is_grid">
-        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in">${won(ytd.income)}</span></div>
+        <div class="widget_stat"><span class="widget_stat_label">수입</span><span class="widget_stat_value amount_in secret">${won(ytd.income)}</span></div>
         <div class="widget_stat"><span class="widget_stat_label">생활 지출</span><span class="widget_stat_value">${won(ytd.expense)}</span></div>
         <div class="widget_stat"><span class="widget_stat_label">저축</span><span class="widget_stat_value">${signedWon(ytd.saving)}</span></div>
         <div class="widget_stat"><span class="widget_stat_label">저축률</span><span class="widget_stat_value">${saveRate}%</span></div>
@@ -227,11 +269,25 @@ function openDrill(s, key, monthLabel) {
   if (!pick) return;
   const [title, list] = pick;
   const net = sum(list, (e) => (e.flow === 'in' ? e.amount : -e.amount));
+  const orders = kind === 'cat' ? (s.coupang?.items || []).filter((o) => o.category === name) : [];
+  const taken = kind === 'cat' ? -Math.round(Math.min(s.coupang?.delta.get(name) || 0, 0)) : 0;
   openSheet({
     title: `${monthLabel} ${title}`,
     body: `
-      <p class="drill_total">${list.length}건 · ${net < 0 ? '-' : '+'}${won(Math.abs(net))}</p>
-      ${groupedList(list, '해당하는 내역이 없어요')}`,
+      ${list.length || !orders.length ? `
+        <p class="drill_total">${list.length}건 · ${net < 0 ? '-' : '+'}${won(Math.abs(net))}</p>
+        ${taken ? `<p class="drill_note">이 중 쿠팡 주문 ${won(taken)}은 실제 카테고리로 나눠 보여줘요</p>` : ''}
+        ${groupedList(list, '해당하는 내역이 없어요')}` : ''}
+      ${orders.length ? `
+        <p class="drill_note">쿠팡 주문 ${orders.length}건 · ${won(sum(orders, (o) => o.amount))} (카드대금·생활비 이체에서 옮김)</p>
+        <ul>
+          ${orders.sort(byDateDesc).map((o) => `
+            <li class="coupang_item">
+              <span class="coupang_item_date">${fmtDate(o.date).slice(5)}</span>
+              <span class="coupang_item_name">${esc(o.title)}</span>
+              <span class="coupang_item_amount">${won(o.amount)}</span>
+            </li>`).join('')}
+        </ul>` : ''}`,
     onMount(body, close) {
       body.addEventListener('click', (e) => {
         const id = e.target.closest('[data-entry]')?.dataset.entry;
@@ -251,7 +307,14 @@ const statButton = (key, label, value, sub = '', valueClass = '') => `
     ${sub ? `<span class="stat_sub">${sub}</span>` : ''}
   </button>`;
 
+/** 월별 ↔ 연도별 전환 */
+const modeToggle = (mode) => `
+  <div class="segment" role="group" aria-label="보기 방식">
+    ${[['month', '월별'], ['year', '연도별']].map(([key, label]) => `<button type="button" class="segment_btn${key === mode ? ' is_active' : ''}" data-mode="${key}" aria-pressed="${key === mode}">${label}</button>`).join('')}
+  </div>`;
+
 function view(ledger) {
+  if (viewMode.get(ledger.id) === 'year') return yearView(ledger);
   const month = monthOf(ledger.id);
   const accounts = [...new Set(byLedger('entries', ledger.id).map((e) => e.account).filter(Boolean))].sort();
   const account = accounts.includes(viewAccount.get(ledger.id)) ? viewAccount.get(ledger.id) : '';
@@ -263,6 +326,7 @@ function view(ledger) {
 
   return {
     html: `
+      ${modeToggle('month')}
       <div class="month_nav">
         <button type="button" class="icon_btn" data-step="-1" aria-label="이전 달">${ICONS.back}</button>
         <button type="button" class="month_nav_label" data-action="pick_month" aria-label="${fmtMonth(month)}, 년·월 직접 선택">${fmtMonth(month)}<span class="month_nav_caret" aria-hidden="true">▾</span></button>
@@ -281,7 +345,7 @@ function view(ledger) {
         ${s.refund ? `<p class="hero_sub">쓴 돈 ${won(s.spent)} - 환급·환불 ${won(s.refund)}</p>` : ''}
         <p class="hero_sub">${compareText(s, prev)}</p>
         <div class="stat_grid">
-          ${statButton('income', '수입', won(s.income), `급여 ${won(s.salary)}${s.rent ? ` · 월세 ${won(s.rent)}` : ''}`, ' amount_in')}
+          ${statButton('income', '수입', won(s.income), `<span class="secret">급여 ${won(s.salary)}${s.rent ? ` · 월세 ${won(s.rent)}` : ''}</span>`, ' amount_in secret')}
           ${statButton('saving', '저축·투자', signed(s.saving))}
           <div class="stat_item"><p class="stat_label">남은 돈</p><p class="stat_value">${signed(left)}</p><p class="stat_sub">수입 - 지출 - 저축</p></div>
           ${statButton('moved', '계좌 이동·목돈', won(s.movedTotal), '합계에서 제외')}
@@ -290,6 +354,7 @@ function view(ledger) {
       ${s.cats.length ? `
         <section class="card">
           <h2 class="card_title">카테고리별 지출 <span class="field_hint">누르면 내역 보기</span></h2>
+          ${s.coupang?.moved ? `<p class="card_desc">쿠팡 주문 ${won(Math.round(s.coupang.moved))}을 카드대금·생활비 이체에서 실제 카테고리로 나눴어요</p>` : ''}
           <ul class="cat_bars">${bars(s.cats.map(([name, value]) => [name, value, `data-drill="cat:${esc(name)}"`]), s.cats[0][1], s.spent)}</ul>
         </section>` : ''}
       ${trendHtml(ledger.id, month, account)}
@@ -302,12 +367,22 @@ function view(ledger) {
         <p class="card_desc">문자를 붙여넣거나 백업 파일을 올리면 자동으로 분류해서 넣어요. 폰에 자동 전송을 설정하면 문자가 올 때마다 저절로 들어와요.</p>
         <button type="button" class="btn btn_sub" data-action="import">${ICONS.message}<span>문자 내역 가져오기</span></button>
       </section>
+      <section class="card">
+        <h2 class="card_title">쿠팡 주문으로 나누기</h2>
+        <p class="card_desc">카드대금·생활비 이체에 섞인 쿠팡 결제를 상품별 실제 카테고리(육아·식비·생필품 등)로 나눠 보여줘요. 지출 총액은 그대로예요.</p>
+        <button type="button" class="btn btn_sub" data-action="coupang">${ICONS.wallet}<span>쿠팡 주문 가져오기</span></button>
+      </section>
       <button type="button" class="fab" data-action="add" aria-label="내역 추가">${ICONS.plus}</button>`,
     mount(el) {
       el.addEventListener('click', (e) => {
-        const target = e.target.closest('[data-step],[data-action],[data-entry],[data-account],[data-drill],[data-jump]');
+        const target = e.target.closest('[data-step],[data-action],[data-entry],[data-account],[data-drill],[data-jump],[data-mode]');
         if (!target) return;
-        const { step, action, entry, drill, jump } = target.dataset;
+        const { step, action, entry, drill, jump, mode } = target.dataset;
+        if (mode) {
+          viewMode.set(ledger.id, mode);
+          viewYear.set(ledger.id, month.slice(0, 4));
+          refresh();
+        }
         if (step || jump) {
           const next = jump || addMonths(month, Number(step));
           if (next > thisMonth()) return; // 미래 달로는 가지 않는다
@@ -321,8 +396,118 @@ function view(ledger) {
         if (drill) openDrill(s, drill, monthLabel);
         if (action === 'add') openEntryForm({ ledger, defaults: { date: month === thisMonth() ? todayStr() : `${month}-01`, account } });
         if (action === 'import') openSmsImport(ledger);
+        if (action === 'coupang') openCoupangImport(ledger);
         if (action === 'pick_month') openMonthPicker(ledger, month, account);
         if (entry) openEntryForm({ ledger, entry: state.entries.find((x) => x.id === entry) });
+      });
+    },
+  };
+}
+
+/* ---------- 연도별 통계 ---------- */
+
+/** 만원 단위로 줄인 금액 (연도 비교표용) */
+const manShort = (v) => `${v < 0 ? '-' : ''}${Math.round(Math.abs(v) / 10000).toLocaleString('ko-KR')}만`;
+const rateOf = (x) => (x.income ? Math.round((x.saving / x.income) * 100) : 0);
+
+/** 내역이 있는 해(와 올해), 최근 해가 앞 */
+function yearsOf(ledgerId) {
+  const now = thisMonth();
+  const years = new Set(byLedger('entries', ledgerId).map((e) => e.date.slice(0, 7)).filter((m) => m <= now).map((m) => m.slice(0, 4)));
+  years.add(now.slice(0, 4));
+  return [...years].sort().reverse();
+}
+
+function yearView(ledger) {
+  const now = thisMonth();
+  const years = yearsOf(ledger.id);
+  const year = years.includes(viewYear.get(ledger.id)) ? viewYear.get(ledger.id) : years[0];
+  const index = years.indexOf(year);
+  const s = summarize(ledger.id, year);
+  const left = s.income - s.expense - s.saving;
+  const yearLabel = `${year}년`;
+  const signed = (v) => `${v < 0 ? '-' : ''}${won(Math.abs(v))}`;
+
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`).filter((m) => m <= now);
+  const monthly = months.map((m) => [`${Number(m.slice(5))}월`, summarize(ledger.id, m).expense, `data-jump="${m}" aria-label="${fmtMonth(m)}로 이동"`]);
+  const monthMax = Math.max(...monthly.map((r) => r[1]));
+  const activeMonths = monthly.filter((r) => r[1]).length; // 월평균은 지출이 있는 달로 나눈다
+  // 올해는 아직 안 끝났으니 작년 같은 기간(1월~이번 달)과 비교
+  const isThisYear = year === now.slice(0, 4);
+  const prevExpense = sum(months, (m) => summarize(ledger.id, `${year - 1}${m.slice(4)}`).expense);
+  const prevLabel = isThisYear ? '작년 같은 기간' : '작년';
+  const diff = s.expense - prevExpense;
+  const yearly = years.map((y) => [y, summarize(ledger.id, y)]);
+
+  return {
+    html: `
+      ${modeToggle('year')}
+      <div class="month_nav">
+        <button type="button" class="icon_btn" data-year="${years[index + 1] || ''}" aria-label="이전 해"${years[index + 1] ? '' : ' disabled'}>${ICONS.back}</button>
+        <p class="month_nav_label">${yearLabel}</p>
+        <button type="button" class="icon_btn" data-year="${years[index - 1] || ''}" aria-label="다음 해"${index > 0 ? '' : ' disabled'}>${ICONS.next}</button>
+      </div>
+      <section class="card">
+        <button type="button" class="hero_link" data-drill="expense">
+          <span class="hero_label">${yearLabel} 생활 지출</span>
+          <span class="hero_value">${won(s.expense)}</span>
+        </button>
+        ${activeMonths ? `<p class="hero_sub">월평균 ${won(Math.round(s.expense / activeMonths))} · ${activeMonths}개월</p>` : ''}
+        ${prevExpense ? `<p class="hero_sub">${diff === 0 ? `${prevLabel}과 지출이 같아요` : `${prevLabel}보다 ${won(Math.abs(diff))} ${diff > 0 ? '더 썼어요' : '덜 썼어요'}`}</p>` : ''}
+        <div class="stat_grid">
+          ${statButton('income', '수입', won(s.income), `<span class="secret">급여 ${won(s.salary)}${s.rent ? ` · 월세 ${won(s.rent)}` : ''}</span>`, ' amount_in secret')}
+          ${statButton('saving', '저축·투자', signed(s.saving))}
+          <div class="stat_item"><p class="stat_label">남은 돈</p><p class="stat_value">${signed(left)}</p><p class="stat_sub">수입 - 지출 - 저축</p></div>
+          <div class="stat_item"><p class="stat_label">저축률</p><p class="stat_value">${rateOf(s)}%</p><p class="stat_sub">저축 ÷ 수입</p></div>
+        </div>
+      </section>
+      ${monthMax ? `
+        <section class="card">
+          <h2 class="card_title">월별 지출 <span class="field_hint">누르면 그 달로 이동</span></h2>
+          <ul class="cat_bars">${bars(monthly, monthMax)}</ul>
+        </section>` : ''}
+      ${s.cats.length ? `
+        <section class="card">
+          <h2 class="card_title">카테고리별 지출 <span class="field_hint">누르면 내역 보기</span></h2>
+          ${s.coupang?.moved ? `<p class="card_desc">쿠팡 주문 ${won(Math.round(s.coupang.moved))}을 카드대금·생활비 이체에서 실제 카테고리로 나눴어요</p>` : ''}
+          <ul class="cat_bars">${bars(s.cats.map(([name, value]) => [name, value, `data-drill="cat:${esc(name)}"`]), s.cats[0][1], s.spent)}</ul>
+        </section>` : ''}
+      ${yearly.length > 1 ? `
+        <section class="card">
+          <h2 class="card_title">연도별 비교 <span class="field_hint">단위 만원</span></h2>
+          <table class="year_table">
+            <thead><tr><th scope="col">연도</th><th scope="col">수입</th><th scope="col">생활 지출</th><th scope="col">저축</th><th scope="col">저축률</th></tr></thead>
+            <tbody>
+              ${yearly.map(([y, x]) => `
+                <tr${y === year ? ' class="is_active"' : ''}>
+                  <th scope="row"><button type="button" class="year_table_btn" data-year="${y}">${y}</button></th>
+                  <td class="amount_in secret">${manShort(x.income)}</td>
+                  <td>${manShort(x.expense)}</td>
+                  <td>${manShort(x.saving)}</td>
+                  <td>${rateOf(x)}%</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </section>` : ''}`,
+    mount(el) {
+      el.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-mode],[data-year],[data-jump],[data-drill]');
+        if (!target) return;
+        const { mode, jump, drill } = target.dataset;
+        if (mode) {
+          viewMode.set(ledger.id, mode);
+          refresh();
+        }
+        if (target.dataset.year) {
+          viewYear.set(ledger.id, target.dataset.year);
+          refresh();
+        }
+        if (jump) {
+          viewMode.set(ledger.id, 'month');
+          viewMonth.set(ledger.id, jump);
+          refresh();
+        }
+        if (drill) openDrill(s, drill, yearLabel);
       });
     },
   };
@@ -387,16 +572,16 @@ function buildEntries(ledger, messages, { accounts, members } = {}) {
     custom: parseJson(setting('sms_rules'), []),
     isRent: rentMatcher(),
   };
-  const known = new Set(state.entries.map((e) => e.ref).filter(Boolean));
+  const known = new Set(state.entries.flatMap((e) => [e.ref, refKey(e.ref, e.date)]).filter(Boolean));
   const stats = { rent: 0, dup: 0, other: 0, byAccount: new Map(), byCategory: new Map() };
   const fresh = [];
   messages.forEach((m) => {
     const tx = parseKbSms(m.body, m.date, ctx.accounts);
     if (!tx) { stats.other += 1; return; }
-    if (known.has(tx.ref)) { stats.dup += 1; return; }
+    if (known.has(tx.ref) || known.has(refKey(tx.ref, tx.date))) { stats.dup += 1; return; }
     const c = classify(tx, ctx);
     if (!c) { stats.rent += 1; return; }
-    known.add(tx.ref);
+    known.add(tx.ref).add(refKey(tx.ref, tx.date));
     fresh.push({ ledger_id: ledger.id, date: tx.date, flow: c.flow, category: c.category, amount: tx.amount, months: '', memo: tx.who || tx.kind, by: '', account: tx.account, ref: tx.ref });
     stats.byAccount.set(tx.account, (stats.byAccount.get(tx.account) || 0) + 1);
     stats.byCategory.set(c.category, (stats.byCategory.get(c.category) || 0) + 1);
@@ -407,14 +592,18 @@ function buildEntries(ledger, messages, { accounts, members } = {}) {
   return { fresh, stats };
 }
 
-async function saveEntries(fresh, onProgress) {
+async function saveRows(table, fresh, onProgress) {
   let saved = 0;
   for (let i = 0; i < fresh.length; i += IMPORT_CHUNK) {
     onProgress?.(Math.min(i + IMPORT_CHUNK, fresh.length), fresh.length);
-    saved += (await insertMany('entries', fresh.slice(i, i + IMPORT_CHUNK))).length;
+    saved += (await insertMany(table, fresh.slice(i, i + IMPORT_CHUNK))).length;
   }
   return saved;
 }
+
+const showProgress = (box, n, total) => {
+  box.innerHTML = `<div class="import_progress"><p>저장 중 ${n}/${total}</p><div class="cat_bar_track"><div class="cat_bar_fill" style="width:${Math.round((n / total) * 100)}%"></div></div></div>`;
+};
 
 /** 폰 자동 전송으로 받은 문자함을 분류해서 넣고 비운다 (동기화할 때마다) */
 let processing = false;
@@ -425,7 +614,7 @@ async function processInbox() {
   try {
     const inbox = state.inbox.slice();
     const { fresh } = buildEntries(ledger, inbox.map((r) => ({ date: Date.parse(r.received_at) || Date.now(), body: r.text })));
-    const saved = fresh.length ? await saveEntries(fresh) : 0;
+    const saved = fresh.length ? await saveRows('entries', fresh) : 0;
     await removeMany('inbox', inbox.map((r) => r.id));
     if (saved) toast(`은행 문자 ${saved}건을 가계부에 넣었어요`);
   } catch (err) {
@@ -582,14 +771,85 @@ function openSmsImport(ledger, sharedText = '') {
       const ok = await runTask(e.target, async () => {
         await saveSetting('bank_accounts', JSON.stringify(options.accounts));
         await saveSetting('family_members', JSON.stringify(options.members));
-        saved = await saveEntries(fresh, (n, total) => {
-          box.innerHTML = `<div class="import_progress"><p>저장 중 ${n}/${total}</p><div class="cat_bar_track"><div class="cat_bar_fill" style="width:${Math.round((n / total) * 100)}%"></div></div></div>`;
-        });
+        saved = await saveRows('entries', fresh, (n, total) => showProgress(box, n, total));
       });
       busy = false;
       if (ok) {
         closeSheet();
         toast(`${saved.toLocaleString('ko-KR')}건을 넣었어요`);
+      }
+    });
+  }
+}
+
+/* ---------- 쿠팡 주문 → 실제 카테고리 ---------- */
+
+function openCoupangImport(ledger) {
+  const known = new Set(byLedger('records', ledger.id).filter((r) => r.type === COUPANG_TYPE).map((r) => parseJson(r.data, {}).key).filter(Boolean));
+  let closeSheet;
+  let busy = false;
+
+  openSheet({
+    title: '쿠팡 주문 가져오기',
+    body: `
+      <div class="import_body">
+        <p class="card_desc">쿠팡 결제는 이미 카드대금·생활비 이체로 잡혀 있어서 지출에 더하지 않아요. 주문한 달의 그 금액에서 떼어 상품별 카테고리로 나눠 보여줘요.</p>
+        <label class="field">
+          <span class="field_label">쿠팡 결제 카드 (카드대금 내역 이름에 들어간 말)</span>
+          <input class="field_input" name="card" maxlength="20" placeholder="예) OO카드" value="${esc(setting('coupang_card'))}">
+          <span class="field_hint">비워두면 모든 카드대금에서 나눠요. 생활비 이체는 항상 포함해요</span>
+        </label>
+        <label class="import_pick">
+          <input type="file" accept=".csv,text/csv" class="blind" name="csv">
+          <span class="import_pick_icon">${ICONS.wallet}</span>
+          <strong>쿠팡 주문내역 파일(CSV) 고르기</strong>
+          <span class="field_hint">이미 넣은 주문은 건너뛰어요</span>
+        </label>
+      </div>`,
+    onMount(body, close) {
+      closeSheet = close;
+      const box = body.querySelector('.import_body');
+      body.querySelector('input[type=file]').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const card = box.querySelector('[name=card]').value.trim();
+        const result = buildCoupangRecords(await file.text(), ledger.id, known);
+        if (!result) return toast('쿠팡 주문내역 CSV가 아니에요', true);
+        analyze(box, result, card);
+      });
+    },
+    onClose: () => { if (busy) toast('가져오기는 계속 진행 중이에요'); },
+  });
+
+  function analyze(box, { fresh, stats }, card) {
+    if (!fresh.length) {
+      box.innerHTML = `<p class="empty">새로 넣을 주문이 없어요${stats.dup ? `<br>(이미 있는 주문 상품 ${stats.dup}건)` : ''}</p>`;
+      return;
+    }
+    const dates = fresh.map((r) => r.date).sort();
+    box.innerHTML = `
+      <dl class="info_list import_summary">
+        <dt>기간</dt><dd>${fmtDate(dates[0])} ~ ${fmtDate(dates[dates.length - 1])}</dd>
+        <dt>새 주문 상품</dt><dd>${fresh.length.toLocaleString('ko-KR')}건</dd>
+        ${[...stats.byCategory].sort((a, b) => b[1][1] - a[1][1]).map(([name, [n, amount]]) => `<dt>${esc(name)}</dt><dd>${n}건 · ${won(amount)}</dd>`).join('')}
+        ${stats.dup ? `<dt>이미 있는 상품</dt><dd>${stats.dup.toLocaleString('ko-KR')}건 건너뜀</dd>` : ''}
+        ${stats.canceled ? `<dt>전부 취소·반품</dt><dd>${stats.canceled}건 제외</dd>` : ''}
+        <dt>나눌 덩어리</dt><dd>${card ? `카드대금(${esc(card)})` : '모든 카드대금'} + 생활비 이체</dd>
+      </dl>
+      <button type="button" class="btn" data-start>${fresh.length.toLocaleString('ko-KR')}건 넣기</button>`;
+
+    box.querySelector('[data-start]').addEventListener('click', async (e) => {
+      busy = true;
+      let saved = 0;
+      const ok = await runTask(e.target, async () => {
+        if (card !== setting('coupang_card')) await saveSetting('coupang_card', card);
+        saved = await saveRows('records', fresh, (n, total) => showProgress(box, n, total));
+      });
+      busy = false;
+      if (ok) {
+        closeSheet();
+        refresh();
+        toast(`쿠팡 주문 ${saved.toLocaleString('ko-KR')}건을 넣었어요`);
       }
     });
   }

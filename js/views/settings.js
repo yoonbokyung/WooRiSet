@@ -4,6 +4,7 @@ import { call } from '../api.js';
 import { runTask, toast, confirmSheet } from '../ui.js';
 import { esc, fmtDate } from '../utils.js';
 import { familyName } from './dashboard.js';
+import { getModule } from '../modules/index.js';
 
 export function settingsView() {
   const c = getConfig();
@@ -62,7 +63,7 @@ export function settingsView() {
           <button type="submit" class="btn btn_sub">기간 메모 추가</button>
         </form>
       </section>
-      <section class="card">
+      ${getModule('travel') ? `<section class="card">
         <h2 class="card_title">사진 저장 폴더</h2>
         <p class="card_desc">앱에서 올린 사진은 구글 드라이브의 이 폴더 아래 <strong>여행 이름 폴더</strong>로 정리돼요. 비워두면 '우리셋 사진' 폴더를 써요. 원본 사진은 옮기지 않아요.</p>
         <form class="form" data-form="photo" novalidate>
@@ -72,7 +73,7 @@ export function settingsView() {
             <button type="submit" class="btn">저장</button>
           </div>
         </form>
-      </section>` : ''}
+      </section>` : ''}` : ''}
       <section class="card">
         <h2 class="card_title">데이터</h2>
         <dl class="info_list">

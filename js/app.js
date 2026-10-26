@@ -104,6 +104,15 @@ header.addEventListener('click', (e) => {
   if (nav === 'menu') currentView.onMenu();
 });
 
+// 수입 금액(.secret)은 가려져 있다가 처음 누르면 화면 전체에서 보이게 (새로 열면 다시 가려짐). 링크·내역 열기는 막는다
+document.addEventListener('click', (e) => {
+  const root = document.documentElement;
+  if (root.classList.contains('is_secret_shown') || !e.target.closest('.secret')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  root.classList.add('is_secret_shown');
+}, true);
+
 events.addEventListener('change', render);
 // 동기화하거나 새 장부를 만들면 해당 종류의 카테고리를 바로 준비
 events.addEventListener('change', () => { if (hasConfig()) ensureCategories().catch((err) => toast(err.message, true)); });

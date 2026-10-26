@@ -60,6 +60,16 @@ export function parseKbSms(body, timestamp, accounts) {
   };
 }
 
+/**
+ * 중복 비교용 키: 계좌·거래일·금액·잔액 (시각 자리는 뺀다)
+ * 예전 ref는 시각 자리에 받은 시각(ms)을 넣어서 지금 ref와 글자가 달라도 같은 거래로 알아보게 한다
+ */
+export function refKey(ref, date) {
+  const parts = String(ref || '').split('|');
+  if (parts[0] !== 'kb' || parts.length !== 5) return '';
+  return [parts[1], date, parts[3], parts[4]].join('|');
+}
+
 /** 붙여넣거나 공유한 글에서 KB 문자를 하나씩 나눈다 (여러 개를 한꺼번에 붙여넣어도 됨) */
 export const splitSmsText = (text) => String(text || '')
   .replace(/\r/g, '')
