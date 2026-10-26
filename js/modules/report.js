@@ -73,7 +73,7 @@ function fixedCosts() {
         day: median(list.filter((e) => recent.includes(e.date.slice(0, 7))).map((e) => Number(e.date.slice(8)))),
         isNew: first >= `${recent[0]}-01`,
       });
-    } else if (!quiet.some((m) => byMonth.has(m)) && before.filter((m) => byMonth.has(m)).length >= 3) {
+    } else if (latest.date < `${quiet[0]}-01` && before.filter((m) => byMonth.has(m)).length >= 3) {
       stopped.push({ name: latest.memo || name, category, amount: byMonth.get(latest.date.slice(0, 7)), last: latest.date });
     }
   });
